@@ -1,0 +1,11 @@
+# Netlify picks these up automatically when the repo is linked, so the
+# build command and publish directory don't have to be entered by hand.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback (also covered by public/_redirects, kept here for clarity).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
