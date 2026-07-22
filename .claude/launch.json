@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "percolate",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/cwessdaniels/Documents/5. Systems (iCloud)/Claude Code Projects/percolate",
+      "port": 5173
+    }
+  ]
+}
