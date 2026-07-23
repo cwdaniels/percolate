@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore, accentForEmoji } from '../store';
 import { Segmented } from '../ui';
 import { useAuth } from '../auth';
-import { pushSupported, getPushSubscription, enablePush, disablePush } from '../lib/push';
+import { pushSupported, verifyPushStatus, enablePush, disablePush } from '../lib/push';
 
 const EMOJI_CHOICES = ['☕️', '🌱', '🔥', '🌻', '🦊', '🍩', '🎨', '🚴', '⭐️', '🫘'];
 
@@ -81,9 +81,15 @@ export function NotificationSetup() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!supported) return;
-    getPushSubscription().then((s) => setSubscribed(!!s));
-  }, [supported]);
+    if (!supported || !user) return;
+    // Confirms (and if needed, repairs) the subscription against the
+    // server — a phone-only subscription doesn't count as "on" until the
+    // matching row genuinely exists in Supabase.
+    verifyPushStatus(user.id).then((res) => {
+      setSubscribed(res.subscribed);
+      if (res.error) setError(res.error);
+    });
+  }, [supported, user]);
 
   const enable = async () => {
     if (!user) return;
