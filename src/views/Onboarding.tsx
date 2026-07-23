@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useStore, accentForEmoji } from '../store';
 import { Segmented } from '../ui';
+import { useAuth } from '../auth';
+import { pushSupported, getPushSubscription, enablePush, disablePush } from '../lib/push';
 
 const EMOJI_CHOICES = ['☕️', '🌱', '🔥', '🌻', '🦊', '🍩', '🎨', '🚴', '⭐️', '🫘'];
 
@@ -69,30 +71,47 @@ export function InstallHelp() {
 }
 
 export function NotificationSetup() {
-  const supported = 'Notification' in window;
+  const { user } = useAuth();
+  const supported = pushSupported();
   const [perm, setPerm] = useState<NotificationPermission | 'unsupported'>(
     supported ? Notification.permission : 'unsupported'
   );
-  const enable = async () => {
+  const [subscribed, setSubscribed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
     if (!supported) return;
-    const p = await Notification.requestPermission();
-    setPerm(p);
-    if (p === 'granted') {
-      new Notification('Percolate ☕️', {
-        body: 'You’re all set — we’ll ping you when the pot’s fresh.',
-      });
-    }
+    getPushSubscription().then((s) => setSubscribed(!!s));
+  }, [supported]);
+
+  const enable = async () => {
+    if (!user) return;
+    setBusy(true);
+    setError('');
+    const res = await enablePush(user.id);
+    setBusy(false);
+    setPerm(Notification.permission);
+    if (res.ok) setSubscribed(true);
+    else setError(res.error ?? 'Something went wrong.');
   };
+
+  const disable = async () => {
+    if (!user) return;
+    setBusy(true);
+    await disablePush(user.id);
+    setBusy(false);
+    setSubscribed(false);
+  };
+
   if (perm === 'unsupported') {
     return (
       <p className="hint">
-        Notifications aren’t available in this browser yet. On iPhone they work
-        once Percolate is added to your Home Screen.
+        Notifications aren’t available in this browser yet. On iPhone, open
+        Percolate from your <strong>Home Screen icon</strong> (not Safari) to
+        turn them on.
       </p>
     );
-  }
-  if (perm === 'granted') {
-    return <p className="hint granted">Notifications are on 🔔 You’re all set.</p>;
   }
   if (perm === 'denied') {
     return (
@@ -102,10 +121,30 @@ export function NotificationSetup() {
       </p>
     );
   }
+  if (perm === 'granted' && subscribed) {
+    return (
+      <>
+        <p className="hint granted">
+          Notifications are on 🔔 You’ll be pinged on mentions and private
+          messages.
+        </p>
+        <button className="btn ghost" onClick={disable} disabled={busy} style={{ marginTop: 8 }}>
+          {busy ? 'Turning off…' : 'Turn off'}
+        </button>
+      </>
+    );
+  }
   return (
-    <button className="btn primary" onClick={enable}>
-      Turn on notifications 🔔
-    </button>
+    <>
+      <button className="btn primary" onClick={enable} disabled={busy}>
+        {busy ? 'Turning on…' : 'Turn on notifications 🔔'}
+      </button>
+      {error && <p className="hint error-hint">{error}</p>}
+      <p className="hint" style={{ marginTop: 8 }}>
+        On iPhone, this only works from the Home Screen icon — if nothing
+        happens, open Percolate from there first.
+      </p>
+    </>
   );
 }
 
