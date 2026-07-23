@@ -7,6 +7,11 @@ interface AuthApi {
   user: User | null;
   loading: boolean;
   sendMagicLink(email: string): Promise<{ error: string | null }>;
+  // Completes sign-in from the 6-digit code in the same email, without ever
+  // leaving the app — needed because tapping the link opens Safari, which
+  // is a separate, isolated storage container from an installed Home
+  // Screen app on iOS, so the session never reaches the installed app.
+  verifyCode(email: string, code: string): Promise<{ error: string | null }>;
   signOut(): Promise<void>;
 }
 
@@ -38,6 +43,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
         options: { emailRedirectTo: window.location.origin },
+      });
+      return { error: error?.message ?? null };
+    },
+    async verifyCode(email: string, code: string) {
+      const { error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: code.trim(),
+        type: 'email',
       });
       return { error: error?.message ?? null };
     },

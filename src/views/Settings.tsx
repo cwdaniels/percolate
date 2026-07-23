@@ -112,10 +112,6 @@ export function Settings() {
         <div className="card">
           <h3>Notifications</h3>
           <NotificationSetup />
-          <p className="hint">
-            Turning this on lets your browser show alerts. Team-wide push (pinging
-            the whole crew on a mention) is a later step.
-          </p>
         </div>
 
         <div className="card">
