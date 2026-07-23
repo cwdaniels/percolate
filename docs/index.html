@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Percolate — Feature Guide</title>
+  <meta name="description" content="A tour of Percolate's channels and roasting workflow, built for the Fireweed Coffee Co team." />
+  <meta name="theme-color" content="#f2eee1" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1b140d" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%98%95%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+
+  <meta property="og:title" content="Percolate" />
+  <meta property="og:description" content="The little team room where schedules get filled, beans get roasted, and nobody has to ask twice. Built for Fireweed Coffee Co." />
+  <meta property="og:type" content="website" />
+
+  <style>
+    .pg {
+      --paper: #f2eee1;
+      --paper-raised: #faf7ee;
+      --ink: #241a12;
+      --muted: #8b7b67;
+      --line: rgba(36, 26, 18, 0.12);
+      --roast: #b5562c;
+      --roast-soft: rgba(181, 86, 44, 0.12);
+      --bloom: #b23368;
+      --leaf: #445e33;
+      --queue: #6b7a3f;
+      --ready: #b5562c;
+      --done: #2c1c12;
+
+      --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-body);
+      line-height: 1.55;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { background: var(--paper); }
+
+    @media (prefers-color-scheme: dark) {
+      .pg {
+        --paper: #1b140d;
+        --paper-raised: #241a11;
+        --ink: #f1e9dc;
+        --muted: #b3a08a;
+        --line: rgba(241, 233, 220, 0.14);
+        --roast: #e2814c;
+        --roast-soft: rgba(226, 129, 76, 0.16);
+        --bloom: #e06a98;
+        --leaf: #7fa25f;
+        --queue: #8fa15c;
+        --ready: #e2814c;
+        --done: #f1e9dc;
+      }
+      body { background: #1b140d; }
+    }
+    :root[data-theme="dark"] .pg {
+      --paper: #1b140d;
+      --paper-raised: #241a11;
+      --ink: #f1e9dc;
+      --muted: #b3a08a;
+      --line: rgba(241, 233, 220, 0.14);
+      --roast: #e2814c;
+      --roast-soft: rgba(226, 129, 76, 0.16);
+      --bloom: #e06a98;
+      --leaf: #7fa25f;
+      --queue: #8fa15c;
+      --ready: #e2814c;
+      --done: #f1e9dc;
+    }
+    :root[data-theme="light"] .pg {
+      --paper: #f2eee1;
+      --paper-raised: #faf7ee;
+      --ink: #241a12;
+      --muted: #8b7b67;
+      --line: rgba(36, 26, 18, 0.12);
+      --roast: #b5562c;
+      --roast-soft: rgba(181, 86, 44, 0.12);
+      --bloom: #b23368;
+      --leaf: #445e33;
+      --queue: #6b7a3f;
+      --ready: #b5562c;
+      --done: #2c1c12;
+    }
+
+    .pg a { color: var(--roast); text-decoration: none; }
+    .pg a:hover { text-decoration: underline; }
+    .pg a:focus-visible,
+    .pg button:focus-visible {
+      outline: 2px solid var(--roast);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+    .prose { max-width: 62ch; }
+
+    h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; }
+
+    /* ---------- Hero ---------- */
+
+    .hero { padding: 96px 0 48px; text-align: left; }
+    .eyebrow {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 18px;
+    }
+    .steam {
+      width: 30px;
+      height: 40px;
+      margin-bottom: 14px;
+      opacity: 0.55;
+    }
+    .steam path {
+      stroke: var(--muted);
+      stroke-width: 2.4;
+      fill: none;
+      stroke-linecap: round;
+      transform-origin: center;
+      animation: drift 6s ease-in-out infinite;
+    }
+    .steam path:nth-child(2) { animation-delay: -2s; }
+    .steam path:nth-child(3) { animation-delay: -4s; }
+    @keyframes drift {
+      0%, 100% { transform: translateY(0) scaleY(1); opacity: 0.35; }
+      50% { transform: translateY(-4px) scaleY(1.06); opacity: 0.7; }
+    }
+
+    .wordmark {
+      font-size: clamp(44px, 7vw, 72px);
+      line-height: 1;
+      letter-spacing: -0.01em;
+    }
+    .wordmark-rule {
+      width: 64px;
+      height: 4px;
+      margin: 18px 0 22px;
+      background: var(--bloom);
+      border-radius: 2px;
+    }
+    .hero p.lede {
+      font-size: clamp(17px, 2vw, 20px);
+      color: var(--ink);
+      max-width: 46ch;
+    }
+    .hero p.sub {
+      font-size: 15px;
+      color: var(--muted);
+      max-width: 50ch;
+      margin-top: 10px;
+    }
+
+    .roast-bar {
+      height: 6px;
+      margin-top: 44px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--queue) 0%, var(--ready) 55%, var(--done) 100%);
+    }
+    .roast-bar-labels {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    /* ---------- In-page nav ---------- */
+
+    nav.toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 4px;
+      padding: 22px 0 0;
+    }
+    nav.toc a {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      padding: 7px 13px;
+      border-radius: 999px;
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+    }
+    nav.toc a:hover { color: var(--roast); text-decoration: none; border-color: var(--roast); }
+
+    /* ---------- Clusters ---------- */
+
+    .cluster { padding: 64px 0; border-top: 1px solid var(--line); }
+    .cluster-head { margin-bottom: 32px; }
+    .cluster-head h2 { font-size: clamp(26px, 3.4vw, 34px); }
+    .cluster-head p { color: var(--muted); margin-top: 10px; font-size: 16px; max-width: 52ch; }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .card.in { opacity: 1; transform: translateY(0); }
+
+    .tile {
+      width: 42px;
+      height: 42px;
+      border-radius: 11px;
+      background: var(--roast-soft);
+      display: grid;
+      place-items: center;
+      font-size: 21px;
+      margin-bottom: 14px;
+    }
+    .card h3 { font-family: var(--font-body); font-size: 16.5px; font-weight: 700; margin-bottom: 7px; }
+    .card p { font-size: 14.5px; color: var(--muted); margin: 0; }
+    .card code {
+      font-family: var(--font-mono);
+      background: var(--roast-soft);
+      color: var(--roast);
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-size: 0.92em;
+    }
+
+    /* Roast section gets one featured card */
+    .featured {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 28px;
+      align-items: center;
+      padding: 28px;
+    }
+    @media (max-width: 700px) {
+      .featured { grid-template-columns: 1fr; }
+    }
+    .featured h3 { font-size: 19px; }
+    .featured p { font-size: 15px; color: var(--ink); opacity: 0.85; }
+    .featured p + p { margin-top: 10px; }
+
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .step { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; }
+    .step-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .step-queue .step-dot { background: var(--queue); }
+    .step-ready .step-dot { background: var(--ready); }
+    .step-done .step-dot { background: var(--done); border: 1px solid var(--line); }
+    .step-arrow { color: var(--muted); font-size: 14px; }
+    .stepper-caption { font-size: 13px; color: var(--muted); margin-top: 12px; }
+
+    /* ---------- Footer ---------- */
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 48px 0 80px;
+    }
+    footer p { font-size: 14.5px; color: var(--muted); max-width: 56ch; }
+    footer .bloom-word { color: var(--bloom); font-weight: 650; }
+    footer .signoff {
+      margin-top: 20px;
+      font-family: var(--font-display);
+      font-size: 15px;
+      color: var(--ink);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .steam path { animation: none; }
+      .card { transition: none; opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="pg">
+    <div class="wrap">
+      <section class="hero">
+        <span class="eyebrow">For the Fireweed crew</span>
+        <svg class="steam" viewBox="0 0 30 40" aria-hidden="true">
+          <path d="M8 38 C 4 30, 12 26, 8 18 C 4 10, 12 6, 9 2" />
+          <path d="M15 38 C 11 30, 19 26, 15 18 C 11 10, 19 6, 16 2" />
+          <path d="M22 38 C 18 30, 26 26, 22 18 C 18 10, 26 6, 23 2" />
+        </svg>
+        <h1 class="wordmark">Percolate</h1>
+        <div class="wordmark-rule"></div>
+        <p class="lede">The little team room where schedules get filled, beans get roasted, and nobody has to ask twice.</p>
+        <p class="sub">Built for Fireweed Coffee Co — everyone's own phone, everything in sync, nothing on a clipboard by the register anymore.</p>
+
+        <div class="roast-bar" aria-hidden="true"></div>
+        <div class="roast-bar-labels"><span>Green</span><span>Roasting</span><span>Dark</span></div>
+
+        <nav class="toc" aria-label="Sections">
+          <a href="#talk">Talk</a>
+          <a href="#organize">Organize</a>
+          <a href="#roast">Roast</a>
+          <a href="#shop">Run the shop</a>
+          <a href="#everywhere">Everywhere</a>
+        </nav>
+      </section>
+
+      <section class="cluster" id="talk">
+        <div class="cluster-head">
+          <h2>Talk</h2>
+          <p>Chat that feels like a group text, not a work chore.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="card"><div class="tile">☕️</div><h3>Channels</h3><p>Bold, italics, tidy bullet lists, and <code>@mentions</code> right in the flow. React with a coffee cup, a check, a laugh. Pin the one message everyone needs to find again.</p></div>
+          <div class="card"><div class="tile">🔒</div><h3>Private messages</h3><p>Some things aren't for the whole channel. Message one person or a few — it never shows up in the team feed, and only the people in it can ever see it.</p></div>
+          <div class="card"><div class="tile">🔎</div><h3>Find anything</h3><p>One search bar covers every message, page, bean, and order you can see — plus a second search right inside any page you're reading.</p></div>
+        </div>
+      </section>
+
+      <section class="cluster" id="organize">
+        <div class="cluster-head">
+          <h2>Organize</h2>
+          <p>The stuff that used to live on a clipboard by the register.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="card"><div class="tile">📅</div><h3>Schedule</h3><p>Tap a day, raise your hand, you're on the books. Everyone sees who's working and when, at a glance.</p></div>
+          <div class="card"><div class="tile">📦</div><h3>Shared checklists</h3><p>Stock lists, prep lists, anything with boxes to tick. Anyone can add to it; check it off as it gets done.</p></div>
+          <div class="card"><div class="tile">📖</div><h3>Pages</h3><p>Wiki-style notes anyone can edit — recipes, how-tos, opening routines. Write <code>- [ ]</code> in front of a line and it becomes a real checkbox, right there on the page.</p></div>
+        </div>
+      </section>
+
+      <section class="cluster" id="roast">
+        <div class="cluster-head">
+          <h2>Roast</h2>
+          <p>Built around how the roaster actually works, not around how software usually works.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="card"><div class="tile">🫘</div><h3>Bean library</h3><p>Every bean on file — origin, roast level, flavor notes, certifications. Sort it, search it, let the whole team keep it current.</p></div>
+
+          <div class="card featured">
+            <div>
+              <h3>🔥 Roasting orders</h3>
+              <p>Paste a whole batch at once — each store's name on its own line becomes its own order, with its beans listed underneath.</p>
+              <p>Check the store's name and every bean checks with it. Uncheck it and it all comes back. Tap <strong>Edit</strong> to fix a typo, bold a name, indent a line, or drop a bean — right on the list, no starting over.</p>
+              <p>When it's out the door, whoever's driving taps <strong>Delivered</strong> right on the order card — no separate list, no second app. It logs who dropped it off and when, then settles quietly into the Delivered history.</p>
+            </div>
+            <div>
+              <div class="stepper">
+                <span class="step step-queue"><span class="step-dot"></span>To Roast</span>
+                <span class="step-arrow">→</span>
+                <span class="step step-ready"><span class="step-dot"></span>Ready to Deliver</span>
+                <span class="step-arrow">→</span>
+                <span class="step step-done"><span class="step-dot"></span>Delivered</span>
+              </div>
+              <p class="stepper-caption">Finished orders don't disappear — they wait in Delivered for whoever needs the paperwork.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cluster" id="shop">
+        <div class="cluster-head">
+          <h2>Run the shop</h2>
+          <p>The parts that used to mean chasing someone down.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="card"><div class="tile">⏱</div><h3>Hours</h3><p>Log time in a few taps. Owners get everyone's hours totaled for payroll — staff only ever see their own.</p></div>
+          <div class="card"><div class="tile">👑</div><h3>Team &amp; invites</h3><p>Bring people on with one code — no accounts to set up by hand. Owners can promote, adjust roles, and manage who's on the team.</p></div>
+        </div>
+      </section>
+
+      <section class="cluster" id="everywhere">
+        <div class="cluster-head">
+          <h2>Everywhere</h2>
+          <p>It lives on the phone already in your apron pocket.</p>
+        </div>
+        <div class="feature-grid">
+          <div class="card"><div class="tile">📲</div><h3>Add to your Home Screen</h3><p>Works like any other app on your phone — no App Store, no download, just a link.</p></div>
+          <div class="card"><div class="tile">🎨</div><h3>Make it yours</h3><p>Pick a profile icon and the whole app picks up its color — buttons, highlights, all of it, just for you.</p></div>
+          <div class="card"><div class="tile">🔄</div><h3>Always in sync</h3><p>Change something on one phone, and it's already there on everyone else's. Each team's data stays walled off to that team, by design.</p></div>
+        </div>
+      </section>
+
+      <footer>
+        <p class="prose">
+          <span class="bloom-word">Fireweed</span> is the wildflower that's first to grow back after everything's burned down. Percolate is named for the way coffee gets there too — a little at a time, until the whole pot's ready.
+        </p>
+        <p class="signoff">Brewed for Fireweed Coffee Co, one shift at a time. ☕️</p>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var cards = document.querySelectorAll('.pg .card');
+      if (reduce || !('IntersectionObserver' in window)) {
+        cards.forEach(function (c) { c.classList.add('in'); });
+        return;
+      }
+      var io = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              e.target.classList.add('in');
+              io.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.15 }
+      );
+      cards.forEach(function (c) { io.observe(c); });
+    })();
+  </script>
+</body>
+</html>
