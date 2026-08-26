@@ -12,14 +12,68 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'updated', label: 'Recent' },
 ];
 
-const EMPTY_FIELDS = { name: '', origin: '', roast: '', flavor: '', certs: '', notes: '' };
+const EMPTY_FIELDS = {
+  name: '',
+  origin: '',
+  roast: '',
+  flavor: '',
+  certs: '',
+  notes: '',
+  sourceUrl: '',
+  cost: undefined as number | undefined,
+};
+
+// A bare domain reads better next to a price than a full URL string.
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+// Only web URLs may become a tappable link. The stored value is
+// team-editable text, so a "javascript:" (or any other scheme) must render
+// as plain text, never as an href the whole team can be handed.
+function webUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
 
 export function CatalogBoard({ channel }: { channel: Channel }) {
   const { state, addCatalogItem, updateCatalogItem, deleteCatalogItem } = useStore();
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('name');
   const [editing, setEditing] = useState<string | 'new' | null>(null);
+  // Cards show everything except their notes, which are long enough to
+  // swamp the list. Per-card rather than one global switch, so reading one
+  // bean's notes doesn't push every other bean off the screen.
+  const [openNotes, setOpenNotes] = useState<Set<string>>(new Set());
   const [fields, setFields] = useState(EMPTY_FIELDS);
+
+  const toggleNotes = (id: string) =>
+    setOpenNotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Origins already on file, so a new entry can be pointed at an existing
+  // one instead of forking a near-duplicate spelling ("Ethiopia" vs
+  // "Ethiopia, Guji Zone"). Scoped to this library, not the whole team.
+  const knownOrigins = useMemo(() => {
+    const set = new Set(
+      state.catalogItems
+        .filter((c) => c.channelId === channel.id && c.origin.trim())
+        .map((c) => c.origin.trim())
+    );
+    return [...set].sort();
+  }, [state.catalogItems, channel.id]);
 
   const items = useMemo(() => {
     const mine = state.catalogItems.filter((c) => c.channelId === channel.id);
@@ -42,7 +96,16 @@ export function CatalogBoard({ channel }: { channel: Channel }) {
     setEditing('new');
   };
   const startEdit = (c: CatalogItem) => {
-    setFields({ name: c.name, origin: c.origin, roast: c.roast, flavor: c.flavor, certs: c.certs, notes: c.notes });
+    setFields({
+      name: c.name,
+      origin: c.origin,
+      roast: c.roast,
+      flavor: c.flavor,
+      certs: c.certs,
+      notes: c.notes,
+      sourceUrl: c.sourceUrl,
+      cost: c.cost,
+    });
     setEditing(c.id);
   };
   const save = () => {
@@ -64,10 +127,16 @@ export function CatalogBoard({ channel }: { channel: Channel }) {
             autoFocus
           />
           <input
+            list="cat-origins"
             value={fields.origin}
             onChange={(e) => setFields({ ...fields, origin: e.target.value })}
             placeholder="Origin (region, country)"
           />
+          <datalist id="cat-origins">
+            {knownOrigins.map((o) => (
+              <option key={o} value={o} />
+            ))}
+          </datalist>
           <input
             value={fields.roast}
             onChange={(e) => setFields({ ...fields, roast: e.target.value })}
@@ -83,6 +152,29 @@ export function CatalogBoard({ channel }: { channel: Channel }) {
             onChange={(e) => setFields({ ...fields, certs: e.target.value })}
             placeholder="Certifications (Organic, Fair Trade…)"
           />
+          <div className="form-grid">
+            <input
+              type="url"
+              inputMode="url"
+              value={fields.sourceUrl}
+              onChange={(e) => setFields({ ...fields, sourceUrl: e.target.value })}
+              placeholder="Where you buy it (URL, optional)"
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              value={fields.cost ?? ''}
+              onChange={(e) =>
+                setFields({
+                  ...fields,
+                  cost: e.target.value === '' ? undefined : parseFloat(e.target.value),
+                })
+              }
+              placeholder="Cost ($)"
+            />
+          </div>
           <textarea
             value={fields.notes}
             onChange={(e) => setFields({ ...fields, notes: e.target.value })}
@@ -117,6 +209,10 @@ export function CatalogBoard({ channel }: { channel: Channel }) {
 
   return (
     <div className="screen-pad">
+      <button className="btn primary" onClick={startNew}>
+        Add a bean 🫘
+      </button>
+
       <input
         className="search-input"
         value={q}
@@ -140,43 +236,79 @@ export function CatalogBoard({ channel }: { channel: Channel }) {
         <EmptyState
           emoji="🫘"
           title={q ? 'No beans match' : 'The library is empty'}
-          hint={q ? 'Try a different search.' : 'Add your first bean below.'}
+          hint={q ? 'Try a different search.' : 'Add your first bean above.'}
         />
       )}
       {items.map((c) => {
         const by = state.users.find((u) => u.id === c.updatedBy);
+        const buy = webUrl(c.sourceUrl);
+        const notesOpen = openNotes.has(c.id);
         return (
-          <button key={c.id} className="card cat-card" onClick={() => startEdit(c)}>
-            <span className="cat-head">
-              <span className="cat-name">{c.name}</span>
-              {c.roast && <span className="cat-roast">{c.roast}</span>}
-            </span>
-            {c.origin && <span className="cat-line">📍 {c.origin}</span>}
-            {c.flavor && <span className="cat-line">👅 {c.flavor}</span>}
-            {c.certs && (
-              <span className="cat-certs">
-                {c.certs.split(',').map((cert) => (
-                  <span key={cert} className="cert-badge">
-                    {cert.trim()}
-                  </span>
-                ))}
+          <div key={c.id} className="card cat-card">
+            <div className="cat-card-body">
+              {/* Whole card is on show — nothing is behind a tap except the
+                  notes, which are the only field long enough to bury the
+                  bean below it. Finding a bean is search and sort's job. */}
+              <div className="cat-card-top">
+                <div className="cat-summary">
+                  <span className="cat-name">{c.name}</span>
+                  {c.origin && <span className="cat-line">📍 {c.origin}</span>}
+                  {c.roast && <span className="cat-line">🔥 {c.roast}</span>}
+                  {c.flavor && <span className="cat-line">👅 {c.flavor}</span>}
+                  {(c.cost != null || c.sourceUrl) && (
+                    <span className="cat-line cat-source">
+                      {c.cost != null && <span className="cat-cost">${c.cost.toFixed(2)}</span>}
+                      {c.sourceUrl && <span>🔗 {hostOf(c.sourceUrl)}</span>}
+                    </span>
+                  )}
+                  {c.certs && (
+                    <span className="cat-certs">
+                      {c.certs.split(',').map((cert, i) => (
+                        <span key={i} className="cert-badge">
+                          {cert.trim()}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </div>
+                <button className="cat-edit-btn" onClick={() => startEdit(c)}>
+                  Edit
+                </button>
+              </div>
+
+              {c.notes && (
+                <div className="cat-notes-block">
+                  <button
+                    className="cat-notes-toggle"
+                    onClick={() => toggleNotes(c.id)}
+                    aria-expanded={notesOpen}
+                  >
+                    <span className="cat-notes-caret" aria-hidden="true">
+                      {notesOpen ? '▾' : '▸'}
+                    </span>
+                    {notesOpen ? 'Hide notes' : 'Notes'}
+                  </button>
+                  {notesOpen && <p className="cat-notes-full">{c.notes}</p>}
+                </div>
+              )}
+
+              <span className="note-meta">
+                {by?.name ?? '?'} ·{' '}
+                {new Date(c.updatedAt).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                })}
               </span>
+            </div>
+
+            {buy && (
+              <a className="cat-buy-link" href={buy} target="_blank" rel="noreferrer">
+                Buy ↗
+              </a>
             )}
-            {c.notes && <span className="cat-notes">{c.notes}</span>}
-            <span className="note-meta">
-              {by?.name ?? '?'} ·{' '}
-              {new Date(c.updatedAt).toLocaleDateString(undefined, {
-                month: 'short',
-                day: 'numeric',
-              })}{' '}
-              · tap to edit
-            </span>
-          </button>
+          </div>
         );
       })}
-      <button className="btn primary" onClick={startNew}>
-        Add a bean 🫘
-      </button>
       <p className="footnote">
         Works like a wiki — anyone on the team can add or edit a bean.
       </p>

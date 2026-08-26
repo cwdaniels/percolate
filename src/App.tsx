@@ -6,6 +6,7 @@ import { ChannelView } from './views/Channel';
 import { Hours } from './views/Hours';
 import { Settings } from './views/Settings';
 import { Mentions } from './views/Mentions';
+import { OpenChannelCtx } from './nav';
 
 type Tab = 'home' | 'mentions' | 'hours' | 'settings';
 
@@ -30,6 +31,7 @@ function Shell() {
   const [open, setOpen] = useState<OpenTarget | null>(null);
 
   return (
+    <OpenChannelCtx.Provider value={(id) => setOpen({ id })}>
     <div className="app">
       <div className="app-body">
         {tab === 'home' && <Home onOpen={(t) => setOpen(t)} />}
@@ -57,6 +59,7 @@ function Shell() {
         />
       )}
     </div>
+    </OpenChannelCtx.Provider>
   );
 }
 

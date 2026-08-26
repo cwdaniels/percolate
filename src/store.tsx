@@ -10,10 +10,13 @@ import type {
   Order,
   OrderStage,
   ShiftSignup,
+  PayPeriod,
   State,
   Team,
   User,
+  WageRate,
 } from './types';
+import { totalsFor } from './lib/payroll';
 
 // Local, persisted-to-device data layer for the prototype. The Api surface
 // below is deliberately shaped like the calls a hosted backend (e.g.
@@ -125,10 +128,10 @@ function roastingChannel(): Channel {
 function seedCatalogItems(): CatalogItem[] {
   const now = Date.now();
   return [
-    { id: uid(), channelId: 'bean-library', name: 'Ethiopia Guji', origin: 'Guji Zone, Ethiopia', roast: 'City (light)', flavor: 'Bright, floral, stone fruit', certs: 'Organic', notes: 'Market favorite — sells out fast', updatedBy: 'quinn', updatedAt: now - 86400000 * 2 },
-    { id: uid(), channelId: 'bean-library', name: 'Colombia Huila', origin: 'Huila, Colombia', roast: 'City+ (medium)', flavor: 'Caramel, red apple, cocoa', certs: 'Fair Trade', notes: 'Backbone of Public Universal Blend', updatedBy: 'quinn', updatedAt: now - 86400000 * 5 },
-    { id: uid(), channelId: 'bean-library', name: 'Decaf Mexico', origin: 'Chiapas, Mexico', roast: 'Full City (med-dark)', flavor: 'Chocolate, graham cracker', certs: 'Swiss Water, Organic', notes: 'Low stock — reorder soon', updatedBy: 'maya', updatedAt: now - 86400000 },
-    { id: uid(), channelId: 'bean-library', name: 'Brazil Cerrado', origin: 'Cerrado Mineiro, Brazil', roast: 'Full City (med-dark)', flavor: 'Nutty, chocolate, low acid', certs: '', notes: 'Espresso base for One Too Many Mornings', updatedBy: 'jonah', updatedAt: now - 86400000 * 8 },
+    { id: uid(), channelId: 'bean-library', name: 'Ethiopia Guji', origin: 'Guji Zone, Ethiopia', roast: 'City (light)', flavor: 'Bright, floral, stone fruit', certs: 'Organic', notes: 'Market favorite — sells out fast', sourceUrl: '', updatedBy: 'quinn', updatedAt: now - 86400000 * 2 },
+    { id: uid(), channelId: 'bean-library', name: 'Colombia Huila', origin: 'Huila, Colombia', roast: 'City+ (medium)', flavor: 'Caramel, red apple, cocoa', certs: 'Fair Trade', notes: 'Backbone of Public Universal Blend', sourceUrl: '', updatedBy: 'quinn', updatedAt: now - 86400000 * 5 },
+    { id: uid(), channelId: 'bean-library', name: 'Decaf Mexico', origin: 'Chiapas, Mexico', roast: 'Full City (med-dark)', flavor: 'Chocolate, graham cracker', certs: 'Swiss Water, Organic', notes: 'Low stock — reorder soon', sourceUrl: '', updatedBy: 'maya', updatedAt: now - 86400000 },
+    { id: uid(), channelId: 'bean-library', name: 'Brazil Cerrado', origin: 'Cerrado Mineiro, Brazil', roast: 'Full City (med-dark)', flavor: 'Nutty, chocolate, low acid', certs: '', notes: 'Espresso base for One Too Many Mornings', sourceUrl: '', updatedBy: 'jonah', updatedAt: now - 86400000 * 8 },
   ];
 }
 
@@ -445,11 +448,11 @@ function seed(): State {
   ];
 
   const hoursEntries: HoursEntry[] = [
-    { id: uid(), userId: 'maya', teamId: 'fireweed', date: dayThisMonth(2), hours: 5.5, note: 'Market prep' },
-    { id: uid(), userId: 'maya', teamId: 'fireweed', date: dayThisMonth(9), hours: 4, note: 'Roast day' },
-    { id: uid(), userId: 'jonah', teamId: 'fireweed', date: dayThisMonth(3), hours: 6, note: 'Deliveries' },
-    { id: uid(), userId: 'jonah', teamId: 'fireweed', date: dayThisMonth(10), hours: 4.25, note: 'Bagging + labels' },
-    { id: uid(), userId: 'quinn', teamId: 'fireweed', date: dayThisMonth(9), hours: 7, note: 'Roasting' },
+    { id: uid(), userId: 'maya', teamId: 'fireweed', date: dayThisMonth(2), hours: 5.5, tips: 18, note: 'Market prep' },
+    { id: uid(), userId: 'maya', teamId: 'fireweed', date: dayThisMonth(9), hours: 4, tips: 0, note: 'Roast day' },
+    { id: uid(), userId: 'jonah', teamId: 'fireweed', date: dayThisMonth(3), hours: 6, tips: 24.5, note: 'Deliveries' },
+    { id: uid(), userId: 'jonah', teamId: 'fireweed', date: dayThisMonth(10), hours: 4.25, tips: 0, note: 'Bagging + labels' },
+    { id: uid(), userId: 'quinn', teamId: 'fireweed', date: dayThisMonth(9), hours: 7, tips: 31, note: 'Roasting' },
   ];
 
   return {
@@ -467,10 +470,14 @@ function seed(): State {
     catalogItems: seedCatalogItems(),
     orders: seedOrders(),
     hoursEntries,
+    wageRates: [],
+    payPeriods: [],
+    staffNotes: [],
     mentionsSeenAt: {},
     mentionMeta: {},
     threadReadAt: {},
     favorites: {},
+    channelOrder: {},
   };
 }
 
@@ -493,6 +500,17 @@ export function favoritesFor(state: State, userId: string): string[] {
   return [...byPriority, ...rest].slice(0, MAX_FAVORITES);
 }
 
+// A user's preferred display order for a set of channel ids (tiles and
+// list rows alike — moving a channel here shifts it in both). Channels
+// the user has never touched keep their incoming (creation) order,
+// appended after anything they've explicitly arranged.
+export function orderedChannelIds(state: State, userId: string, ids: string[]): string[] {
+  const stored = state.channelOrder?.[userId];
+  if (!stored) return ids;
+  const rank = new Map(stored.map((id, i) => [id, i]));
+  return [...ids].sort((a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity));
+}
+
 // Unread count for the Mentions tab badge: channel mentions the user
 // hasn't read/archived/deleted, plus private threads with messages from
 // others newer than the user's last read of that thread.
@@ -513,18 +531,35 @@ export function unreadInboxCount(state: State, userId: string): number {
   return unreadMentions + unreadThreads;
 }
 
+// The user-editable columns of a catalog entry (everything except the
+// identity/audit fields the store fills in itself).
+export type CatalogFields = Pick<
+  CatalogItem,
+  'name' | 'origin' | 'roast' | 'flavor' | 'certs' | 'notes' | 'sourceUrl' | 'cost'
+>;
+
 export interface Api {
   state: State;
   me: User;
   createProfile(name: string, emoji: string): void;
   finishOnboarding(): void;
-  send(channelId: string, text: string): void;
-  addSignup(channelId: string, date: string, note: string): void;
+  send(channelId: string, text: string, replyToId?: string): void;
+  addSignup(channelId: string, date: string, note: string, isAlternate?: boolean): void;
   removeSignup(id: string): void;
+  // Owner-only per-weekday staffing cap. `patch` merges into whatever's
+  // already set for other weekdays; pass `null` for a day to clear its cap.
+  setScheduleCapacity(
+    channelId: string,
+    patch: Record<string, { max: number; altMax?: number } | null>
+  ): Promise<{ error?: string }>;
   togglePin(id: string): void;
   editMessage(id: string, text: string): void;
+  deleteMessage(id: string): void;
   toggleReaction(id: string, emoji: string): void;
   renameChannel(id: string, name: string, emoji: string): void;
+  // Supplier address for one section of a board. Owner-only server-side
+  // (channels_update is owner-gated); lives in the channel's `lists` JSON.
+  setListEmail(channelId: string, listId: string, email: string): Promise<{ error?: string }>;
   addChannel(
     teamId: string,
     name: string,
@@ -532,21 +567,16 @@ export interface Api {
     type: 'chat' | 'board' | 'notes' | 'schedule' | 'catalog' | 'orders',
     lists?: { title: string }[]
   ): void;
-  ensureDm(otherIds: string[]): void;
+  ensureDm(otherIds: string[]): Promise<string>;
   markThreadRead(channelId: string): void;
   setMentionMeta(messageId: string, patch: MentionMeta): void;
-  addCatalogItem(
-    channelId: string,
-    fields: Pick<CatalogItem, 'name' | 'origin' | 'roast' | 'flavor' | 'certs' | 'notes'>
-  ): void;
-  updateCatalogItem(
-    id: string,
-    fields: Pick<CatalogItem, 'name' | 'origin' | 'roast' | 'flavor' | 'certs' | 'notes'>
-  ): void;
+  addCatalogItem(channelId: string, fields: CatalogFields): void;
+  updateCatalogItem(id: string, fields: CatalogFields): void;
   deleteCatalogItem(id: string): void;
   addOrder(channelId: string, title: string, items: string[]): void;
   toggleOrderItem(orderId: string, itemId: string): void;
   setOrderStage(orderId: string, stage: OrderStage): void;
+  setOrderInvoiced(orderId: string, invoiced: boolean): void;
   completeOrder(orderId: string): void;
   // Order-item editing (Supabase-backed provider only; optional so the
   // legacy local provider still satisfies the interface).
@@ -561,16 +591,43 @@ export interface Api {
   addListItem(channelId: string, listId: string, text: string): void;
   toggleListItem(id: string): void;
   clearDone(channelId: string, listId: string): void;
+  // Due date, notes, and assignment on one item, edited together in its
+  // detail panel. `null` clears a field; `undefined` leaves it untouched.
+  editListItemDetails(
+    id: string,
+    patch: { dueDate?: string | null; notes?: string; assignedTo?: string | null }
+  ): void;
   addNote(channelId: string, title: string, body: string): void;
   updateNote(id: string, title: string, body: string): void;
   deleteNote(id: string): void;
-  addHours(date: string, hours: number, note: string): void;
+  addHours(date: string, hours: number, tips: number, note: string): void;
+  editHours(id: string, hours: number, tips: number, note: string): void;
   deleteHours(id: string): void;
+  // Payroll. A raise is a new rate with a later effectiveFrom — never an
+  // edit to an existing one, or past periods would silently restate.
+  setWageRate(userId: string, rate: number, effectiveFrom: string): Promise<{ error?: string }>;
+  // Freezes the period's per-person totals onto the record, then stamps it
+  // paid. Returns an error string rather than throwing so the view can show it.
+  // Settles ONE person for a period, freezing their totals. Paying someone
+  // early doesn't touch anyone else's timesheet.
+  markPersonPaid(
+    periodStart: string,
+    periodEnd: string,
+    userId: string
+  ): Promise<{ error?: string }>;
+  reopenPerson(periodStart: string, periodEnd: string, userId: string): Promise<{ error?: string }>;
+  setStaffNote(userId: string, note: string): Promise<{ error?: string }>;
   markMentionsSeen(): void;
   switchUser(id: string): void;
   toggleFavorite(channelId: string): void;
+  moveChannel(channelId: string, direction: 'up' | 'down'): void;
+  // Searches the server, so it reaches past the in-memory message window
+  // (MESSAGE_WINDOW in supastore) and can find old messages this client
+  // never loaded. RLS scopes results to what the caller is allowed to see.
+  searchMessages(query: string): Promise<Message[]>;
   switchTeam(id: string): void;
   addTeam(name: string, emoji: string): void;
+  setTeamEmoji(emoji: string): void;
   updateProfile(name: string, emoji: string): void;
   resetAll(): void;
 }
@@ -597,6 +654,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             mentionMeta: parsed.mentionMeta ?? {},
             threadReadAt: parsed.threadReadAt ?? {},
             favorites: parsed.favorites ?? {},
+            channelOrder: parsed.channelOrder ?? {},
+            wageRates: parsed.wageRates ?? [],
+            payPeriods: parsed.payPeriods ?? [],
+            staffNotes: parsed.staffNotes ?? [],
           };
         }
         if (parsed.version) return migrate(parsed);
@@ -623,26 +684,63 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       finishOnboarding() {
         setState((s) => ({ ...s, onboarded: true }));
       },
-      send(channelId: string, text: string) {
+      send(channelId: string, text: string, replyToId?: string) {
         setState((s) => ({
           ...s,
           messages: [
             ...s.messages,
-            { id: uid(), channelId, userId: s.currentUserId, text, ts: Date.now() },
+            { id: uid(), channelId, userId: s.currentUserId, text, ts: Date.now(), replyToId },
           ],
         }));
       },
-      addSignup(channelId: string, date: string, note: string) {
+      addSignup(channelId: string, date: string, note: string, isAlternate?: boolean) {
         setState((s) => ({
           ...s,
           signups: [
             ...s.signups,
-            { id: uid(), channelId, date, userId: s.currentUserId, note },
+            { id: uid(), channelId, date, userId: s.currentUserId, note, isAlternate },
           ],
         }));
       },
       removeSignup(id: string) {
-        setState((s) => ({ ...s, signups: s.signups.filter((x) => x.id !== id) }));
+        // Mirrors the server's promotion trigger: if the departing signup
+        // was a primary slot with room now free, bump the longest-waiting
+        // alternate up. The prototype has no capacity concept to check
+        // against here, so it promotes unconditionally — good enough for a
+        // local demo, not load-bearing like the real trigger is.
+        setState((s) => {
+          const leaving = s.signups.find((x) => x.id === id);
+          const rest = s.signups.filter((x) => x.id !== id);
+          if (!leaving || leaving.isAlternate) return { ...s, signups: rest };
+          const waiting = rest
+            .filter((x) => x.channelId === leaving.channelId && x.date === leaving.date && x.isAlternate)
+            .sort((a, b) => a.id.localeCompare(b.id))[0];
+          if (!waiting) return { ...s, signups: rest };
+          return {
+            ...s,
+            signups: rest.map((x) => (x.id === waiting.id ? { ...x, isAlternate: false } : x)),
+          };
+        });
+      },
+      async setScheduleCapacity(
+        channelId: string,
+        patch: Record<string, { max: number; altMax?: number } | null>
+      ) {
+        setState((s) => ({
+          ...s,
+          channels: s.channels.map((c) => {
+            if (c.id !== channelId) return c;
+            const next: Record<string, { max: number; altMax?: number }> = {
+              ...(c.scheduleCapacity ?? {}),
+            };
+            for (const [day, val] of Object.entries(patch)) {
+              if (val) next[day] = val;
+              else delete next[day];
+            }
+            return { ...c, scheduleCapacity: next };
+          }),
+        }));
+        return {};
       },
       addListItem(channelId: string, listId: string, text: string) {
         setState((s) => ({
@@ -657,6 +755,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState((s) => ({
           ...s,
           listItems: s.listItems.map((i) => (i.id === id ? { ...i, done: !i.done } : i)),
+        }));
+      },
+      editListItemDetails(
+        id: string,
+        patch: { dueDate?: string | null; notes?: string; assignedTo?: string | null }
+      ) {
+        setState((s) => ({
+          ...s,
+          listItems: s.listItems.map((i) => {
+            if (i.id !== id) return i;
+            const next = { ...i };
+            if (patch.dueDate !== undefined) next.dueDate = patch.dueDate ?? undefined;
+            if (patch.notes !== undefined) next.notes = patch.notes;
+            if (patch.assignedTo !== undefined) {
+              next.assignedTo = patch.assignedTo ?? undefined;
+              next.assignedBy = patch.assignedTo ? s.currentUserId : undefined;
+            }
+            return next;
+          }),
         }));
       },
       clearDone(channelId: string, listId: string) {
@@ -683,6 +800,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ),
         }));
       },
+      deleteMessage(id: string) {
+        setState((s) => ({
+          ...s,
+          messages: s.messages.filter((m) => m.id !== id),
+        }));
+      },
       toggleReaction(id: string, emoji: string) {
         setState((s) => ({
           ...s,
@@ -697,6 +820,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             return { ...m, reactions };
           }),
         }));
+      },
+      async setListEmail(channelId: string, listId: string, email: string) {
+        setState((s) => ({
+          ...s,
+          channels: s.channels.map((c) =>
+            c.id === channelId
+              ? {
+                  ...c,
+                  lists: (c.lists ?? []).map((l) =>
+                    l.id === listId ? { ...l, orderEmail: email || undefined } : l
+                  ),
+                }
+              : c
+          ),
+        }));
+        return {};
       },
       renameChannel(id: string, name: string, emoji: string) {
         setState((s) => ({
@@ -736,10 +875,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ],
         }));
       },
-      ensureDm(otherIds: string[]) {
+      async ensureDm(otherIds: string[]) {
+        let id = '';
         setState((s) => {
           const members = [...new Set([s.currentUserId, ...otherIds])].sort();
-          const id = dmIdFor(members);
+          id = dmIdFor(members);
           if (s.channels.some((c) => c.id === id)) return s;
           return {
             ...s,
@@ -757,6 +897,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ],
           };
         });
+        return id;
       },
       markThreadRead(channelId: string) {
         setState((s) => ({
@@ -785,7 +926,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
       },
-      addCatalogItem(channelId, fields) {
+      addCatalogItem(channelId: string, fields: CatalogFields) {
         setState((s) => ({
           ...s,
           catalogItems: [
@@ -800,7 +941,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ],
         }));
       },
-      updateCatalogItem(id, fields) {
+      updateCatalogItem(id: string, fields: CatalogFields) {
         setState((s) => ({
           ...s,
           catalogItems: s.catalogItems.map((c) =>
@@ -858,6 +999,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   stage,
                   deliveredBy: stage === 'delivered' ? s.currentUserId : undefined,
                   deliveredAt: stage === 'delivered' ? Date.now() : undefined,
+                }
+              : o
+          ),
+        }));
+      },
+      setOrderInvoiced(orderId: string, invoiced: boolean) {
+        setState((s) => ({
+          ...s,
+          orders: s.orders.map((o) =>
+            o.id === orderId
+              ? {
+                  ...o,
+                  invoiced,
+                  invoicedBy: invoiced ? s.currentUserId : undefined,
+                  invoicedAt: invoiced ? Date.now() : undefined,
                 }
               : o
           ),
@@ -944,13 +1100,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteNote(id: string) {
         setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }));
       },
-      addHours(date: string, hours: number, note: string) {
+      addHours(date: string, hours: number, tips: number, note: string) {
         setState((s) => ({
           ...s,
           hoursEntries: [
             ...s.hoursEntries,
-            { id: uid(), userId: s.currentUserId, teamId: s.currentTeamId, date, hours, note },
+            {
+              id: uid(),
+              userId: s.currentUserId,
+              teamId: s.currentTeamId,
+              date,
+              hours,
+              tips,
+              note,
+            },
           ],
+        }));
+      },
+      editHours(id: string, hours: number, tips: number, note: string) {
+        setState((s) => ({
+          ...s,
+          hoursEntries: s.hoursEntries.map((e) =>
+            e.id === id ? { ...e, hours, tips, note } : e
+          ),
         }));
       },
       deleteHours(id: string) {
@@ -981,6 +1153,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
       },
+      moveChannel(channelId: string, direction: 'up' | 'down') {
+        setState((s) => {
+          const teamIds = s.channels.filter((c) => c.teamId === s.currentTeamId).map((c) => c.id);
+          const order = orderedChannelIds(s, s.currentUserId, teamIds);
+          const i = order.indexOf(channelId);
+          const j = direction === 'up' ? i - 1 : i + 1;
+          if (i < 0 || j < 0 || j >= order.length) return s;
+          const next = [...order];
+          [next[i], next[j]] = [next[j], next[i]];
+          return {
+            ...s,
+            channelOrder: { ...(s.channelOrder ?? {}), [s.currentUserId]: next },
+          };
+        });
+      },
       switchUser(id: string) {
         setState((s) => ({ ...s, currentUserId: id }));
       },
@@ -1008,6 +1195,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
       },
+      setTeamEmoji(emoji: string) {
+        setState((s) => ({
+          ...s,
+          teams: s.teams.map((t) => (t.id === s.currentTeamId ? { ...t, emoji } : t)),
+        }));
+      },
       updateProfile(name: string, emoji: string) {
         setState((s) => ({
           ...s,
@@ -1022,6 +1215,84 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem(KEY);
         setState(seed());
       },
+      // Payroll, prototype-side. A raise appends a new rate rather than
+      // editing an old one, matching the real backend's wage history.
+      async setWageRate(userId: string, rate: number, effectiveFrom: string) {
+        setState((s) => ({
+          ...s,
+          wageRates: [
+            ...s.wageRates.filter(
+              (r) => !(r.userId === userId && r.effectiveFrom === effectiveFrom)
+            ),
+            { id: uid(), teamId: s.currentTeamId, userId, rate, effectiveFrom },
+          ],
+        }));
+        return {};
+      },
+      // Prototype mirror of the real backend: freeze one person's totals
+      // onto their line and stamp it paid.
+      async markPersonPaid(periodStart: string, periodEnd: string, userId: string) {
+        setState((s) => {
+          const t = totalsFor(s.hoursEntries, s.wageRates, userId, periodStart, periodEnd);
+          const line = {
+            userId,
+            hours: t.hours,
+            gross: t.gross,
+            tips: t.tips,
+            paidAt: Date.now(),
+            paidBy: s.currentUserId,
+          };
+          const existing = s.payPeriods.find(
+            (p) => p.periodStart === periodStart && p.periodEnd === periodEnd
+          );
+          if (!existing) {
+            return {
+              ...s,
+              payPeriods: [
+                ...s.payPeriods,
+                {
+                  id: uid(),
+                  teamId: s.currentTeamId,
+                  periodStart,
+                  periodEnd,
+                  note: '',
+                  lines: [line],
+                },
+              ],
+            };
+          }
+          return {
+            ...s,
+            payPeriods: s.payPeriods.map((p) =>
+              p.id === existing.id
+                ? { ...p, lines: [...p.lines.filter((l) => l.userId !== userId), line] }
+                : p
+            ),
+          };
+        });
+        return {};
+      },
+      async reopenPerson(periodStart: string, periodEnd: string, userId: string) {
+        setState((s) => ({
+          ...s,
+          payPeriods: s.payPeriods.map((p) =>
+            p.periodStart === periodStart && p.periodEnd === periodEnd
+              ? { ...p, lines: p.lines.filter((l) => l.userId !== userId) }
+              : p
+          ),
+        }));
+        return {};
+      },
+      async setStaffNote(userId: string, note: string) {
+        setState((s) => ({
+          ...s,
+          staffNotes: [
+            ...s.staffNotes.filter((n) => n.userId !== userId),
+            { userId, note, updatedAt: Date.now() },
+          ],
+        }));
+        return {};
+      },
     }),
     []
   );
@@ -1029,7 +1300,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const me =
     state.users.find((u) => u.id === state.currentUserId) ?? state.users[0];
 
-  return <Ctx.Provider value={{ state, me, ...actions }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider
+      value={{
+        state,
+        me,
+        ...actions,
+        // Local prototype: the whole history is already in memory, so
+        // "ask the server" is just a filter. SupabaseStoreProvider replaces
+        // this with a real query. Defined out here rather than inside the
+        // memoized `actions` so it reads fresh state.
+        searchMessages: async (query: string) => {
+          const needle = query.trim().toLowerCase();
+          if (!needle) return [];
+          return state.messages
+            .filter((m) => m.text.toLowerCase().includes(needle))
+            .slice(-40)
+            .reverse();
+        },
+      }}
+    >
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useStore(): Api {

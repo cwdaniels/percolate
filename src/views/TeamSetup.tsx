@@ -7,6 +7,18 @@ const EMOJI_CHOICES = ['☕️', '🌱', '🔥', '🌻', '🦊', '🍩', '🎨',
 
 export type MyTeam = { teamId: string; role: 'owner' | 'staff'; name: string; emoji: string };
 
+// Postgres rejects a non-allowlisted team insert with "new row violates
+// row-level security policy for table \"teams\"", which means nothing to the
+// person reading it. Translate that one case; pass anything else through.
+function friendlyTeamError(msg: string, email?: string | null): string {
+  if (/row-level security/i.test(msg) || /\b42501\b/.test(msg)) {
+    return `Starting a brand-new team isn’t switched on for ${
+      email ?? 'this account'
+    } yet.`;
+  }
+  return msg;
+}
+
 async function fetchMyTeams(userId: string): Promise<MyTeam[]> {
   const { data, error } = await supabase
     .from('team_members')
@@ -82,13 +94,36 @@ export function TeamGate({ children }: { children: (team: MyTeam) => React.React
 }
 
 function CreateOrJoinTeam({ onReady }: { onReady: () => void }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [mode, setMode] = useState<'create' | 'join'>('create');
   const [name, setName] = useState('');
   const [emoji, setEmoji] = useState('☕️');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // null = still checking. Asking upfront means someone who can't create a
+  // team is shown the invite-code path instead of filling in a form that was
+  // always going to be refused.
+  const [canCreate, setCanCreate] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    supabase.rpc('can_create_team').then(({ data, error }) => {
+      if (!alive) return;
+      // Fail open: if the check itself breaks, show the form and let the
+      // insert be the authority rather than blocking a legitimate owner.
+      setCanCreate(error ? true : data === true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+
+  // Deliberately no auto-redirect to the join tab: a blocked account should
+  // land on the explanation of *why*, which then offers the invite path.
+  // Silently swapping tabs leaves them guessing.
+  const blocked = mode === 'create' && canCreate === false;
 
   // Live-preview the app accent as you pick your icon (as Settings does).
   useEffect(() => {
@@ -111,7 +146,7 @@ function CreateOrJoinTeam({ onReady }: { onReady: () => void }) {
         .eq('id', user.id);
     }
     setBusy(false);
-    if (error) setError(error.message);
+    if (error) setError(friendlyTeamError(error.message, user?.email));
     else onReady();
   };
 
@@ -130,14 +165,42 @@ function CreateOrJoinTeam({ onReady }: { onReady: () => void }) {
     <div className="onboard">
       <div className="slide">
         <div className="onboard-hero">☕️</div>
-        <h1>{mode === 'create' ? 'Start your team' : 'Join a team'}</h1>
+        <h1>
+          {blocked ? 'Almost there' : mode === 'create' ? 'Start your team' : 'Join a team'}
+        </h1>
         <p className="sub">
-          {mode === 'create'
-            ? 'This becomes your team’s home — general chat and everything else is created for you automatically.'
-            : 'Got an invite code from your team’s owner? Enter it below.'}
+          {blocked
+            ? 'Two ways forward from here — one of these will be it.'
+            : mode === 'create'
+              ? 'This becomes your team’s home — general chat and everything else is created for you automatically.'
+              : 'Got an invite code from your team’s owner? Enter it below.'}
         </p>
 
-        {mode === 'create' ? (
+        {blocked ? (
+          <div className="card" style={{ textAlign: 'left' }}>
+            <h3>Not switched on yet</h3>
+            <p className="hint">
+              Brand-new teams are enabled one address at a time while Percolate
+              is young. You’re signed in as <strong>{user?.email}</strong>.
+            </p>
+            <p className="hint">
+              If you were invited under a <em>different</em> email, sign out
+              below and use that one instead — that’s the usual culprit. If
+              you’re joining someone else’s team, you want an invite code. And
+              if neither fits, ask Wess to enable this address.
+            </p>
+            <button
+              className="btn primary"
+              onClick={() => {
+                setMode('join');
+                setError('');
+              }}
+              style={{ marginTop: 4 }}
+            >
+              I have an invite code →
+            </button>
+          </div>
+        ) : mode === 'create' ? (
           <form onSubmit={create}>
             <label className="field-label">Team name</label>
             <input
@@ -191,16 +254,29 @@ function CreateOrJoinTeam({ onReady }: { onReady: () => void }) {
           </form>
         )}
 
-        <button
-          className="link"
-          style={{ marginTop: 18 }}
-          onClick={() => {
-            setMode(mode === 'create' ? 'join' : 'create');
-            setError('');
-          }}
-        >
-          {mode === 'create' ? 'Have an invite code instead?' : '‹ Back to creating a team'}
-        </button>
+        {/* Hidden on the blocked panel, which offers the switch itself. */}
+        {!blocked && (
+          <button
+            className="link"
+            style={{ marginTop: 18 }}
+            onClick={() => {
+              setMode(mode === 'create' ? 'join' : 'create');
+              setError('');
+            }}
+          >
+            {mode === 'create' ? 'Have an invite code instead?' : '‹ Back to creating a team'}
+          </button>
+        )}
+
+        {/* Escape hatch. Without this, signing in under the wrong address
+            leaves you unable to create, unable to join, and unable to leave. */}
+        <p className="footnote" style={{ marginTop: 22 }}>
+          Signed in as {user?.email}
+          {' · '}
+          <button className="link" onClick={() => signOut()}>
+            Use a different email
+          </button>
+        </p>
       </div>
     </div>
   );

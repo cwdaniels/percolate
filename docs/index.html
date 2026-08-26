@@ -195,6 +195,37 @@
     }
     nav.toc a:hover { color: var(--roast); text-decoration: none; border-color: var(--roast); }
 
+    /* ---------- Start here (how-to) ---------- */
+
+    ol.howto {
+      list-style: none;
+      counter-reset: step;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 14px;
+    }
+    ol.howto li {
+      counter-increment: step;
+      display: flex;
+      gap: 16px;
+      align-items: baseline;
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    ol.howto li::before {
+      content: counter(step);
+      font-family: var(--font-display);
+      font-size: 22px;
+      color: var(--roast);
+      min-width: 26px;
+      text-align: center;
+    }
+    ol.howto b { display: block; font-size: 15.5px; margin-bottom: 3px; }
+    ol.howto p { margin: 0; font-size: 14.5px; color: var(--muted); }
+
     /* ---------- Clusters ---------- */
 
     .cluster { padding: 64px 0; border-top: 1px solid var(--line); }
@@ -271,6 +302,7 @@
     .step-queue .step-dot { background: var(--queue); }
     .step-ready .step-dot { background: var(--ready); }
     .step-done .step-dot { background: var(--done); border: 1px solid var(--line); }
+    .step-invoiced .step-dot { background: var(--leaf); }
     .step-arrow { color: var(--muted); font-size: 14px; }
     .stepper-caption { font-size: 13px; color: var(--muted); margin-top: 12px; }
 
@@ -314,12 +346,32 @@
         <div class="roast-bar-labels"><span>Green</span><span>Roasting</span><span>Dark</span></div>
 
         <nav class="toc" aria-label="Sections">
+          <a href="#start">Start here</a>
           <a href="#talk">Talk</a>
           <a href="#organize">Organize</a>
           <a href="#roast">Roast</a>
           <a href="#shop">Run the shop</a>
           <a href="#everywhere">Everywhere</a>
         </nav>
+      </section>
+
+      <section class="cluster" id="start">
+        <div class="cluster-head">
+          <h2>Start here</h2>
+          <p>Five minutes, once, on the phone you already carry.</p>
+        </div>
+        <ol class="howto">
+          <li><div><b>Open the link and sign in with your email.</b>
+            <p>No password to invent or remember — tap <strong>Email me a code</strong>, then type the 6-digit code from the email. That's the whole sign-in.</p></div></li>
+          <li><div><b>Enter the team invite code.</b>
+            <p>Get it from whoever runs your shop (owners: it's in <strong>Settings</strong>, one tap to copy). Type it once and you're on the team.</p></div></li>
+          <li><div><b>Add Percolate to your Home Screen.</b>
+            <p>In Safari, tap the Share button, then <strong>Add to Home Screen</strong>. It gets an icon and opens full-screen like any other app — no App Store involved.</p></div></li>
+          <li><div><b>Turn on notifications.</b>
+            <p>In <strong>Settings</strong>, allow notifications so mentions, private messages, and roast updates reach your lock screen. You choose which extras you hear about — and Focus mode can quiet all of it when you're off.</p></div></li>
+          <li><div><b>Pick your emoji.</b>
+            <p>Choose a profile icon and the whole app tints itself to match — just on your phone. Everyone's Percolate looks a little like them.</p></div></li>
+        </ol>
       </section>
 
       <section class="cluster" id="talk">
@@ -331,6 +383,8 @@
           <div class="card"><div class="tile">☕️</div><h3>Channels</h3><p>Bold, italics, tidy bullet lists, and <code>@mentions</code> right in the flow. React with a coffee cup, a check, a laugh. Pin the one message everyone needs to find again.</p></div>
           <div class="card"><div class="tile">🔒</div><h3>Private messages</h3><p>Some things aren't for the whole channel. Message one person or a few — it never shows up in the team feed, and only the people in it can ever see it.</p></div>
           <div class="card"><div class="tile">🔎</div><h3>Find anything</h3><p>One search bar covers every message, page, bean, and order you can see — plus a second search right inside any page you're reading.</p></div>
+          <div class="card"><div class="tile">🔔</div><h3>Real notifications</h3><p>Mentions and private messages always reach your lock screen. The extras — roast ready, delivered, new checklist items, a task with your name on it — each have their own switch in Settings.</p></div>
+          <div class="card"><div class="tile">🌙</div><h3>Focus mode</h3><p>Off tonight? Pause everything for a bit, or set quiet hours that repeat daily. The shop keeps humming; your phone doesn't.</p></div>
         </div>
       </section>
 
@@ -340,9 +394,11 @@
           <p>The stuff that used to live on a clipboard by the register.</p>
         </div>
         <div class="feature-grid">
-          <div class="card"><div class="tile">📅</div><h3>Schedule</h3><p>Tap a day, raise your hand, you're on the books. Everyone sees who's working and when, at a glance.</p></div>
-          <div class="card"><div class="tile">📦</div><h3>Shared checklists</h3><p>Stock lists, prep lists, anything with boxes to tick. Anyone can add to it; check it off as it gets done.</p></div>
+          <div class="card"><div class="tile">📅</div><h3>Schedule</h3><p>Tap a day, raise your hand, you're on the books. Owners can cap how many people a weekday needs — when a day fills up, you join as an <strong>alternate</strong>, and if someone drops out, the first alternate is moved up automatically. Nobody has to notice and re-ask.</p></div>
+          <div class="card"><div class="tile">📦</div><h3>Shared checklists</h3><p>Stock lists, prep lists, anything with boxes to tick. Tap an item to give it a <strong>due date</strong> (it shows up on the Schedule calendar), <strong>assign it to someone</strong> (they get a ping), or tuck a note onto it.</p></div>
+          <div class="card"><div class="tile">✉️</div><h3>Order in two taps</h3><p>Each list can remember its supplier's email. One tap copies the unchecked items as a tidy order; another opens an email with it already written. Checked-off things stay out, so nothing gets re-ordered.</p></div>
           <div class="card"><div class="tile">📖</div><h3>Pages</h3><p>Wiki-style notes anyone can edit — recipes, how-tos, opening routines. Write <code>- [ ]</code> in front of a line and it becomes a real checkbox, right there on the page.</p></div>
+          <div class="card"><div class="tile">📣</div><h3>Home tells you what's urgent</h3><p>Open the app and the front page flags what actually needs you: tasks with your name due today or overdue, and orders roasted and waiting on a delivery run.</p></div>
         </div>
       </section>
 
@@ -352,24 +408,27 @@
           <p>Built around how the roaster actually works, not around how software usually works.</p>
         </div>
         <div class="feature-grid">
-          <div class="card"><div class="tile">🫘</div><h3>Bean library</h3><p>Every bean on file — origin, roast level, flavor notes, certifications. Sort it, search it, let the whole team keep it current.</p></div>
+          <div class="card"><div class="tile">🫘</div><h3>Bean library</h3><p>Every bean on file — origin, roast level, flavor profile, certifications, what it costs, and where you buy it (the <strong>Buy ↗</strong> link opens the supplier's page). Longer tasting and sourcing notes tuck behind a little <strong>Notes</strong> toggle so the shelf stays scannable, and every card has an <strong>Edit</strong> button at its top right.</p></div>
+          <div class="card"><div class="tile">🔁</div><h3>Repeat a roast</h3><p><strong>Use as template</strong> on any past order drops its stores and beans back into the new-order box, ready to tweak. Weekly standing orders stop being retyping exercises.</p></div>
 
           <div class="card featured">
             <div>
               <h3>🔥 Roasting orders</h3>
               <p>Paste a whole batch at once — each store's name on its own line becomes its own order, with its beans listed underneath.</p>
               <p>Check the store's name and every bean checks with it. Uncheck it and it all comes back. Tap <strong>Edit</strong> to fix a typo, bold a name, indent a line, or drop a bean — right on the list, no starting over.</p>
-              <p>When it's out the door, whoever's driving taps <strong>Delivered</strong> right on the order card — no separate list, no second app. It logs who dropped it off and when, then settles quietly into the Delivered history.</p>
+              <p>When it's out the door, whoever's driving taps <strong>Delivered</strong> right on the order card — it logs who dropped it off and when. Then one last tap, <strong>Invoice sent 🧾</strong>, moves it into the Invoiced archive — so the delivered pile only ever shows orders still waiting on paperwork.</p>
             </div>
             <div>
               <div class="stepper">
                 <span class="step step-queue"><span class="step-dot"></span>To Roast</span>
                 <span class="step-arrow">→</span>
-                <span class="step step-ready"><span class="step-dot"></span>Ready to Deliver</span>
+                <span class="step step-ready"><span class="step-dot"></span>Ready</span>
                 <span class="step-arrow">→</span>
                 <span class="step step-done"><span class="step-dot"></span>Delivered</span>
+                <span class="step-arrow">→</span>
+                <span class="step step-invoiced"><span class="step-dot"></span>Invoiced</span>
               </div>
-              <p class="stepper-caption">Finished orders don't disappear — they wait in Delivered for whoever needs the paperwork.</p>
+              <p class="stepper-caption">Finished orders don't disappear — they park in the Invoiced archive for whoever needs the records.</p>
             </div>
           </div>
         </div>
@@ -381,8 +440,10 @@
           <p>The parts that used to mean chasing someone down.</p>
         </div>
         <div class="feature-grid">
-          <div class="card"><div class="tile">⏱</div><h3>Hours</h3><p>Log time in a few taps. Owners get everyone's hours totaled for payroll — staff only ever see their own.</p></div>
+          <div class="card"><div class="tile">⏱</div><h3>Hours &amp; tips</h3><p>Log time and take-home tips in a few taps at the end of a shift. Staff only ever see their own; owners see the whole picture.</p></div>
+          <div class="card"><div class="tile">💵</div><h3>Payroll, settled per person</h3><p>Owners set each person's wage rate (raises keep their history), then settle a pay period one person at a time — hours, gross, and tips frozen the moment they're marked paid. Any correction an owner makes to someone's hours is logged, visibly.</p></div>
           <div class="card"><div class="tile">👑</div><h3>Team &amp; invites</h3><p>Bring people on with one code — no accounts to set up by hand. Owners can promote, adjust roles, and manage who's on the team.</p></div>
+          <div class="card"><div class="tile">🕯️</div><h3>Your data, on your terms</h3><p>Percolate exists partly so shop talk doesn't live on someone else's servers forever. Owners can set chat to auto-clear after 30 or 90 days, 6 months, a year — or keep everything. Signing out also wipes the app's cached copy from that device.</p></div>
         </div>
       </section>
 

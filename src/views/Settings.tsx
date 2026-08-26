@@ -4,16 +4,23 @@ import { useAuth } from '../auth';
 import { supabase } from '../lib/supabase';
 import { Avatar } from '../ui';
 import { InstallHelp, NotificationSetup } from './Onboarding';
+import { FocusModeSettings, EventNotifications, DataRetention } from './FocusMode';
 
 const EMOJI_CHOICES = ['☕️', '🌱', '🔥', '🌻', '🦊', '🍩', '🎨', '🚴', '⭐️', '🫘'];
 
 export function Settings() {
-  const { state, me, updateProfile, setRole } = useStore();
+  const { state, me, updateProfile, setRole, setTeamEmoji } = useStore();
   const { user, signOut } = useAuth();
+  const team = state.teams.find((t) => t.id === state.currentTeamId);
   const [name, setName] = useState(me.name);
   const [showInstall, setShowInstall] = useState(false);
   const [invite, setInvite] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [teamEmojiInput, setTeamEmojiInput] = useState(team?.emoji ?? '☕️');
+
+  useEffect(() => {
+    setTeamEmojiInput(team?.emoji ?? '☕️');
+  }, [team?.emoji]);
 
   // Owners can read their team's invite code (RLS: owner-only).
   useEffect(() => {
@@ -83,6 +90,42 @@ export function Settings() {
 
         {me.role === 'admin' && (
           <div className="card">
+            <h3>Team icon</h3>
+            <p className="hint">Shown next to {team?.name ?? 'your team'} everywhere in the app.</p>
+            <div className="team-emoji-row">
+              <span className="team-emoji-current">{team?.emoji ?? '☕️'}</span>
+              <input
+                className="team-emoji-input"
+                value={teamEmojiInput}
+                onChange={(e) => setTeamEmojiInput(e.target.value)}
+                onBlur={() => {
+                  const v = teamEmojiInput.trim();
+                  if (v) setTeamEmoji(v);
+                  else setTeamEmojiInput(team?.emoji ?? '☕️');
+                }}
+                placeholder="Type or paste any emoji"
+                maxLength={8}
+              />
+            </div>
+            <div className="emoji-pick">
+              {EMOJI_CHOICES.map((e) => (
+                <button
+                  key={e}
+                  className={'emoji-opt' + (e === team?.emoji ? ' picked' : '')}
+                  onClick={() => {
+                    setTeamEmoji(e);
+                    setTeamEmojiInput(e);
+                  }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {me.role === 'admin' && (
+          <div className="card">
             <h3>Team &amp; roles</h3>
             <p className="hint">
               Owners see Payroll and can manage channels. Tap a role to change it.
@@ -113,6 +156,12 @@ export function Settings() {
           <h3>Notifications</h3>
           <NotificationSetup />
         </div>
+
+        <EventNotifications />
+
+        <FocusModeSettings />
+
+        <DataRetention />
 
         <div className="card">
           <div className="card-head">

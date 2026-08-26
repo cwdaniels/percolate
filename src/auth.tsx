@@ -56,6 +56,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     async signOut() {
       await supabase.auth.signOut();
+      // Clearing the session doesn't touch Cache Storage, so anything the
+      // service worker cached would otherwise still be readable on this
+      // device by the next person to open the app.
+      try {
+        navigator.serviceWorker?.controller?.postMessage('percolate-purge-cache');
+      } catch {
+        // Non-fatal: a fresh build's activate step purges stale caches anyway.
+      }
     },
   };
 

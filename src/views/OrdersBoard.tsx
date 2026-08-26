@@ -44,12 +44,26 @@ const indentOf = (text: string) => (text.match(/^\t*/)?.[0].length ?? 0);
 const stripIndent = (text: string) => text.replace(/^\t+/, '');
 const withIndent = (clean: string, level: number) => '\t'.repeat(Math.max(0, level)) + clean;
 
-function OrderCard({ order }: { order: Order }) {
+// Reconstructs the same "Heading\n- item\n- item" text the paste box
+// parses, so an old order can seed a new one. Bold markers survive since
+// item text already carries them.
+function orderAsTemplateText(order: Order): string {
+  return [order.title, ...order.items.map((i) => `- ${i.text}`)].join('\n');
+}
+
+function OrderCard({
+  order,
+  onUseAsTemplate,
+}: {
+  order: Order;
+  onUseAsTemplate: (order: Order) => void;
+}) {
   const {
     state,
     me,
     toggleOrderItem,
     setOrderStage,
+    setOrderInvoiced,
     completeOrder,
     uncompleteOrder,
     editOrderItem,
@@ -203,9 +217,29 @@ function OrderCard({ order }: { order: Order }) {
             {o.stage === 'delivered' && deliveredBy && <> · delivered by {deliveredBy.name}</>}
           </span>
           <span className="order-actions">
+            {o.stage === 'roast' || o.stage === 'ready' ? (
+              <button className="link" onClick={() => onUseAsTemplate(o)}>
+                Use as template
+              </button>
+            ) : null}
             {o.stage === 'ready' && (
               <button className="btn primary small" onClick={() => setOrderStage(o.id, 'delivered')}>
                 Delivered 🚚
+              </button>
+            )}
+            {o.stage === 'delivered' && !o.invoiced && (
+              <button className="btn primary small" onClick={() => setOrderInvoiced(o.id, true)}>
+                Invoice sent 🧾
+              </button>
+            )}
+            {o.stage === 'delivered' && o.invoiced && canDelete && (
+              <button className="link" onClick={() => setOrderInvoiced(o.id, false)}>
+                Undo invoice
+              </button>
+            )}
+            {o.stage === 'delivered' && (
+              <button className="link" onClick={() => onUseAsTemplate(o)}>
+                Use as template
               </button>
             )}
             {o.stage === 'delivered' && canDelete && (
@@ -228,7 +262,8 @@ function OrderCard({ order }: { order: Order }) {
 export function OrdersBoard({ channel }: { channel: Channel }) {
   const { state, addOrder } = useStore();
   const [draft, setDraft] = useState('');
-  const [showDelivered, setShowDelivered] = useState(false);
+  const [showInvoiced, setShowInvoiced] = useState(false);
+  const draftRef = React.useRef<HTMLTextAreaElement>(null);
 
   const orders = state.orders
     .filter((o) => o.channelId === channel.id)
@@ -236,7 +271,11 @@ export function OrdersBoard({ channel }: { channel: Channel }) {
   const byStage = (s: Order['stage']) => orders.filter((o) => o.stage === s);
   const roasting = byStage('roast');
   const ready = byStage('ready');
-  const delivered = byStage('delivered');
+  // Delivered splits in two: still needs an invoice (stays visible, it's
+  // actionable) vs fully done (invoiced — tucked away like the old single
+  // "Delivered" archive was, just one step further along).
+  const awaitingInvoice = byStage('delivered').filter((o) => !o.invoiced);
+  const invoiced = byStage('delivered').filter((o) => o.invoiced);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,6 +287,14 @@ export function OrdersBoard({ channel }: { channel: Channel }) {
     setDraft('');
   };
 
+  const useAsTemplate = (order: Order) => {
+    // Appending (with a blank line) rather than replacing, so reusing a
+    // second template doesn't discard whatever you'd already started typing.
+    setDraft((d) => (d.trim() ? d.replace(/\n*$/, '\n\n') : '') + orderAsTemplateText(order));
+    draftRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    draftRef.current?.focus();
+  };
+
   const pending = parseOrders(draft);
 
   return (
@@ -255,6 +302,7 @@ export function OrdersBoard({ channel }: { channel: Channel }) {
       <form className="card" onSubmit={submit}>
         <h3>New order{pending.length > 1 ? `s (${pending.length})` : ''}</h3>
         <textarea
+          ref={draftRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={
@@ -268,7 +316,8 @@ export function OrdersBoard({ channel }: { channel: Channel }) {
         <p className="hint">
           Each un-bulleted line starts a new store; the bulleted lines below become
           its beans. Tap <strong>Edit</strong> on any order to bold, indent, delete,
-          or add beans.
+          or add beans — or <strong>Use as template</strong> on an existing order to
+          paste its beans back in here for a repeat roast.
         </p>
       </form>
 
@@ -277,25 +326,33 @@ export function OrdersBoard({ channel }: { channel: Channel }) {
         <p className="hint stage-empty">Roaster’s off the hook — nothing queued.</p>
       )}
       {roasting.map((o) => (
-        <OrderCard key={o.id} order={o} />
+        <OrderCard key={o.id} order={o} onUseAsTemplate={useAsTemplate} />
       ))}
 
       <h3 className="stage-title">📦 Ready to deliver</h3>
       {ready.length === 0 && <p className="hint stage-empty">Nothing waiting on a delivery run.</p>}
       {ready.map((o) => (
-        <OrderCard key={o.id} order={o} />
+        <OrderCard key={o.id} order={o} onUseAsTemplate={useAsTemplate} />
+      ))}
+
+      <h3 className="stage-title">🚚 Delivered, awaiting invoice</h3>
+      {awaitingInvoice.length === 0 && (
+        <p className="hint stage-empty">Nothing waiting on an invoice.</p>
+      )}
+      {awaitingInvoice.map((o) => (
+        <OrderCard key={o.id} order={o} onUseAsTemplate={useAsTemplate} />
       ))}
 
       <h3 className="stage-title">
-        <button className="stage-toggle" onClick={() => setShowDelivered(!showDelivered)}>
-          ✅ Delivered ({delivered.length}) {showDelivered ? '▾' : '›'}
+        <button className="stage-toggle" onClick={() => setShowInvoiced(!showInvoiced)}>
+          ✅ Invoiced ({invoiced.length}) {showInvoiced ? '▾' : '›'}
         </button>
       </h3>
-      {showDelivered &&
-        (delivered.length === 0 ? (
-          <EmptyState emoji="🚚" title="No deliveries yet" hint="Finished orders park here for your records." />
+      {showInvoiced &&
+        (invoiced.length === 0 ? (
+          <EmptyState emoji="🗂️" title="Nothing invoiced yet" hint="Fully wrapped-up orders park here for your records." />
         ) : (
-          delivered.map((o) => <OrderCard key={o.id} order={o} />)
+          invoiced.map((o) => <OrderCard key={o.id} order={o} onUseAsTemplate={useAsTemplate} />)
         ))}
     </div>
   );

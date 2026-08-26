@@ -13,6 +13,7 @@
   --bubble: #efe4d4;
   --green: #4e9c5f;
   --danger: #c0392b;
+  --blue: #3f6fb0;
   --blur-bg: rgba(247, 242, 234, 0.82);
 }
 
@@ -30,6 +31,7 @@
     --bubble: #2f2214;
     --green: #6fbf80;
     --danger: #e0604f;
+    --blue: #7ba3d9;
     --blur-bg: rgba(23, 16, 9, 0.82);
   }
 }
@@ -177,6 +179,27 @@ textarea:focus-visible {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
+}
+
+/* Room for more than one action beside a card title (Copy + Clear done). */
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+/* Send-the-order row at the foot of a checklist section. */
+.list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 2px;
 }
 
 .link {
@@ -493,6 +516,14 @@ textarea:focus-visible {
   transform: scale(0.99);
 }
 
+/* Distinct from the roast/delivery strip (accent-tinted) so "a task needs
+   you" and "a bag needs a driver" read apart at a glance, not just by
+   position on the screen. */
+.attn-strip-tasks {
+  background: color-mix(in srgb, var(--blue) 15%, var(--card));
+  border-color: color-mix(in srgb, var(--blue) 35%, transparent);
+}
+
 .attn-emoji {
   font-size: 22px;
 }
@@ -506,7 +537,18 @@ textarea:focus-visible {
 /* ---------- Favorites edit ---------- */
 
 .fav-row {
+  padding: 0;
+  gap: 0;
+}
+
+.fav-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
   gap: 12px;
+  min-width: 0;
+  padding: 13px 8px 13px 16px;
+  text-align: left;
 }
 
 .fav-star {
@@ -523,6 +565,22 @@ textarea:focus-visible {
 
 .fav-disabled {
   opacity: 0.45;
+}
+
+.fav-move {
+  display: flex;
+  flex-shrink: 0;
+  padding-right: 10px;
+}
+
+.fav-move-btn {
+  padding: 8px 7px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.fav-move-btn:disabled {
+  opacity: 0.25;
 }
 
 /* ---------- Search ---------- */
@@ -575,38 +633,102 @@ textarea:focus-visible {
 
 /* ---------- Bean catalog ---------- */
 
+/* .cat-card is a plain div (it can contain a real <a> "Buy" link, and a
+   link can't legally nest inside a button) — padding moves to the rows
+   inside it so the Buy link can still reach the card's edges. */
 .cat-card {
-  text-align: left;
-  gap: 5px;
-  transition: transform 0.12s;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  /* Load-bearing: .screen-pad is a fixed-height flex column, and
+     overflow:hidden zeroes a flex item's automatic minimum height — so
+     once the list outgrew the screen, every card got vertically crushed
+     and clipped to a sliver instead of the page scrolling. flex-shrink:0
+     restores full-height cards; the container scrolls as intended. */
+  flex-shrink: 0;
 }
 
-.cat-card:active {
-  transform: scale(0.99);
-}
-
-.cat-head {
+/* All the card's content except the Buy link, which needs to reach the
+   card's edges for its full-width top border. */
+.cat-card-body {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+/* Bean fields on the left, Edit pinned to the top right. Both are in
+   normal flow — an absolutely positioned Edit button had to reserve space
+   by hand, and any name longer than that guess ran underneath it. */
+.cat-card-top {
+  display: flex;
+  align-items: flex-start;
   gap: 8px;
+}
+
+/* min-width:0 is what actually lets long values wrap: without it a flex
+   item refuses to shrink below its content and the text gets clipped by
+   the card's overflow:hidden instead of wrapping. */
+.cat-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .cat-name {
   font-weight: 750;
   font-size: 16.5px;
-}
-
-.cat-roast {
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 
 .cat-line {
   font-size: 14px;
   color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.cat-edit-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* Notes are the one field kept behind a toggle — long enough that leaving
+   them open would bury the next bean. */
+.cat-notes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.cat-notes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cat-notes-caret {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.cat-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
 .cat-certs {
@@ -624,10 +746,28 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
-.cat-notes {
-  color: var(--muted);
-  font-size: 13.5px;
-  font-style: italic;
+.cat-cost {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.cat-notes-full {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.cat-buy-link {
+  display: block;
+  text-align: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 14px;
 }
 
 /* ---------- Orders ---------- */
@@ -748,11 +888,6 @@ textarea:focus-visible {
   flex-direction: column;
   animation: slide-in 0.28s cubic-bezier(0.32, 0.72, 0.2, 1);
   z-index: 10;
-  /* Promote to its own GPU layer so the slide stays smooth over the
-     message list underneath. */
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 @keyframes slide-in {
@@ -916,6 +1051,115 @@ textarea:focus-visible {
   text-decoration: underline;
 }
 
+.msg-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  background: var(--soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 5px 9px;
+  margin: 2px 6px 3px;
+  text-align: left;
+}
+
+.msg-quote-mine {
+  margin-left: auto;
+}
+
+.msg-quote-author {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.msg-quote-text {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* #channel link inside a message. Inherits the bubble's colour so it stays
+   legible on the accent-filled "mine" bubbles as well as plain ones. */
+.chan-link {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-weight: 650;
+  font-size: 0.95em;
+  color: inherit;
+}
+
+.chan-link:active {
+  background: color-mix(in srgb, currentColor 26%, transparent);
+}
+
+.read-receipt {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 6px 0;
+  align-self: flex-end;
+}
+
+.msg-flash {
+  animation: msg-flash-pulse 1.2s ease;
+}
+
+@keyframes msg-flash-pulse {
+  0%,
+  100% {
+    background: transparent;
+  }
+  25% {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-radius: 12px;
+  }
+}
+
+.reply-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+}
+
+.reply-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.reply-preview-author {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.reply-preview-text {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-preview-cancel {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 15px;
+  padding: 2px 6px;
+}
+
 /* ---------- Markdown ---------- */
 
 .md p + p,
@@ -1074,6 +1318,10 @@ button.task-check {
   font-size: 13px;
   font-weight: 650;
   color: var(--accent);
+}
+
+.action-row button.danger {
+  color: var(--danger);
 }
 
 .reactions {
@@ -1321,6 +1569,26 @@ button.task-check {
   overflow-x: auto;
 }
 
+.team-emoji-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.team-emoji-current {
+  font-size: 28px;
+  width: 44px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.team-emoji-input {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+}
+
 .row-new .row-emoji {
   color: var(--accent);
   font-weight: 700;
@@ -1476,6 +1744,19 @@ button.task-check {
   border-radius: 50%;
 }
 
+/* An alternate's dot on the mini-calendar reads as "spoken for, but not
+   confirmed" — same color, faded. A task-due mark is square rather than
+   round so it's distinguishable from a person at a glance, not just by
+   color (which color-blind users can't rely on anyway). */
+.dot-alt {
+  opacity: 0.5;
+}
+
+.dot-task {
+  border-radius: 1px;
+  background: var(--blue);
+}
+
 /* ---------- Schedule day card ---------- */
 
 .signup-row {
@@ -1493,6 +1774,60 @@ button.task-check {
   color: var(--muted);
   font-size: 14px;
   flex: 1;
+}
+
+.signup-alt {
+  opacity: 0.75;
+}
+
+.alt-label {
+  margin-top: 6px;
+  font-weight: 650;
+}
+
+.day-tasks {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.day-task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 0;
+}
+
+.day-task-row + .day-task-row {
+  border-top: 1px solid var(--line);
+}
+
+.day-task-text {
+  font-size: 14.5px;
+}
+
+.day-task-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.capacity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.capacity-day {
+  flex: 1;
+  font-size: 14px;
+}
+
+.capacity-input {
+  width: 64px;
+  flex: none;
+  text-align: center;
 }
 
 .del {
@@ -1549,6 +1884,67 @@ button.task-check {
 .by {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* Checklist items with due date/notes/assignment: the .item row sits
+   inside .item-block so an expandable detail panel can follow it without
+   disturbing OrdersBoard's plain flat .item list elsewhere. */
+.item-block + .item-block {
+  border-top: 1px solid var(--line);
+}
+
+.item-block .item {
+  padding: 7px 0;
+}
+
+.item-block .item + .item {
+  border-top: none;
+}
+
+.item-body-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.item-badge {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.item-badge-due {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  font-weight: 650;
+}
+
+.item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 12px 38px;
+  border-bottom: 1px solid var(--line);
+}
+
+.item-detail select {
+  background: var(--soft);
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font: inherit;
+  color: var(--text);
 }
 
 .add-row {
@@ -1614,10 +2010,19 @@ button.task-check {
 
 /* ---------- Hours ---------- */
 
+/* Stays a column (inheriting .card) so chips and hints stack underneath.
+   It used to be `flex-direction: row`, which turned everything added below
+   the headline into a sibling *column* beside the number — a pill chip
+   squeezed into that row is what rendered as a stray off-centre circle. */
 .total-card {
-  flex-direction: row;
+  gap: 8px;
+}
+
+.total-head {
+  display: flex;
   align-items: baseline;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .total-num {
@@ -1684,12 +2089,99 @@ button.task-check {
 .payroll-name {
   font-weight: 650;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.payroll-sub {
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .payroll-total {
   font-weight: 800;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Payroll: earnings, tips, rate editing ---------- */
+
+.earn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.earn-chip {
+  background: var(--soft);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.earn-chip strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.tip-tag {
+  color: var(--green, #4e9c5f);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-editor {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rate-editor .btn-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.paid-badge {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.staff-note {
+  background: var(--soft);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.year-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-size: 17px;
+}
+
+.year-nav .link {
+  font-size: 22px;
+  padding: 0 10px;
 }
 
 /* ---------- Buttons, misc ---------- */
@@ -1731,6 +2223,84 @@ button.task-check {
 
 .btn.small {
   padding: 9px 14px;
+}
+
+.focus-pause-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.focus-pause-row .btn {
+  background: var(--soft);
+}
+
+.notify-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 9px 0;
+}
+
+.notify-row + .notify-row {
+  border-top: 1px solid var(--line);
+}
+
+.notify-row input {
+  width: auto;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.notify-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notify-label {
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.notify-blurb {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.focus-schedule {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.focus-schedule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.focus-schedule-toggle input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.focus-schedule-times {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.focus-schedule-times input {
+  width: auto;
 }
 
 .hint {

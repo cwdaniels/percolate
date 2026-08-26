@@ -1,5 +1,9 @@
 // Offline-friendly caching + real Web Push handling.
-const CACHE = 'percolate-v2';
+//
+// Bumped to v3 when API-response caching was removed: the activate handler
+// below deletes every cache whose name isn't CACHE, so bumping the version
+// is what purges the team data older builds had already written to disk.
+const CACHE = 'percolate-v3';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -15,16 +19,54 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+
+  // Only ever cache our own app shell. Supabase REST responses carry real
+  // team data (messages, notes, payroll hours) and must NEVER land in Cache
+  // Storage: it outlives sign-out and is readable by whoever picks up the
+  // device next — which for a shared shop iPad is the whole problem.
+  // Falling through without respondWith lets the browser fetch normally.
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  const save = (res) => {
+    // Don't memoize errors or opaque responses.
+    if (res.ok && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy));
+    }
+    return res;
+  };
+
+  // Build assets are content-hashed by Vite, so a given URL's bytes can
+  // never change — a new build means a new filename. Serve them straight
+  // from cache and don't block launch on the network at all. This was the
+  // big one: network-first meant every launch waited on ~450 KB of JS it
+  // already had on disk, and the cache only ever helped if the network was
+  // fully down.
+  if (url.pathname.startsWith('/assets/')) {
+    e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then(save)));
+    return;
+  }
+
+  // Everything else — the HTML shell above all — stays network-first, so a
+  // fresh deploy is picked up straight away rather than being pinned to a
+  // stale index.html pointing at asset names that no longer exist.
   e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
-        return res;
-      })
-      .catch(() => caches.match(e.request))
+    fetch(req)
+      .then(save)
+      .catch(() => caches.match(req))
   );
+});
+
+// Sign-out asks us to drop everything cached on this device.
+self.addEventListener('message', (e) => {
+  if (e.data === 'percolate-purge-cache') {
+    e.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    );
+  }
 });
 
 // A push message arrived from notify-push (see supabase/functions/).

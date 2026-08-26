@@ -32,11 +32,14 @@ create table public.profiles (
 );
 
 create table public.teams (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  emoji      text not null default '☕️',
-  created_by uuid not null references public.profiles (id),
-  created_at timestamptz not null default now()
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  emoji          text not null default '☕️',
+  created_by     uuid not null references public.profiles (id),
+  -- Message retention. NULL = keep everything (the default). Floor of 7 so
+  -- a mistyped '1' can't wipe a week of conversation before anyone notices.
+  retention_days integer check (retention_days is null or retention_days >= 7),
+  created_at     timestamptz not null default now()
 );
 
 -- Invite codes live apart from teams so only owners can read them.
@@ -66,6 +69,14 @@ create table public.channels (
   description text not null default '',
   lists       jsonb,                          -- board sections: [{id,title,emoji}]
   is_home     boolean not null default false, -- the team feed channel; undeletable
+  -- Per-weekday staffing cap for schedule-type channels, e.g.
+  -- {"6": {"max": 2, "altMax": 1}} for Saturdays. Keyed by JS day-of-week
+  -- (0=Sun..6=Sat) as a string (jsonb object keys are always text). A day
+  -- with no entry is unlimited — unchanged from today unless an owner
+  -- explicitly sets a cap. Client decides new-signup primary/alternate
+  -- placement; promote_alternate_on_signup_delete() below is the only
+  -- server-enforced part (auto-promoting on cancellation).
+  schedule_capacity jsonb,
   created_at  timestamptz not null default now(),
   check ((type = 'dm') = (team_id is null))
 );
@@ -81,12 +92,13 @@ create table public.channel_members (
 create index channel_members_user_idx on public.channel_members (user_id);
 
 create table public.messages (
-  id         uuid primary key default gen_random_uuid(),
-  channel_id uuid not null references public.channels (id) on delete cascade,
-  user_id    uuid not null references public.profiles (id),
-  text       text not null check (length(text) between 1 and 8000),
-  edited     boolean not null default false,
-  created_at timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  channel_id   uuid not null references public.channels (id) on delete cascade,
+  user_id      uuid not null references public.profiles (id),
+  text         text not null check (length(text) between 1 and 8000),
+  edited       boolean not null default false,
+  reply_to_id  uuid references public.messages (id) on delete set null,
+  created_at   timestamptz not null default now()
 );
 create index messages_channel_idx on public.messages (channel_id, created_at);
 
@@ -109,25 +121,33 @@ create table public.reactions (
 );
 
 create table public.shift_signups (
-  id         uuid primary key default gen_random_uuid(),
-  channel_id uuid not null references public.channels (id) on delete cascade,
-  user_id    uuid not null references public.profiles (id) on delete cascade,
-  date       date not null,
-  note       text not null default '',
-  created_at timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  channel_id   uuid not null references public.channels (id) on delete cascade,
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  date         date not null,
+  note         text not null default '',
+  is_alternate boolean not null default false,
+  created_at   timestamptz not null default now()
 );
 create index shift_signups_channel_idx on public.shift_signups (channel_id, date);
+create index shift_signups_alt_idx on public.shift_signups (channel_id, date, is_alternate, created_at);
 
 create table public.list_items (
-  id         uuid primary key default gen_random_uuid(),
-  channel_id uuid not null references public.channels (id) on delete cascade,
-  list_id    text not null,
-  text       text not null check (length(text) between 1 and 2000),
-  added_by   uuid not null references public.profiles (id),
-  done       boolean not null default false,
-  created_at timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  channel_id  uuid not null references public.channels (id) on delete cascade,
+  list_id     text not null,
+  text        text not null check (length(text) between 1 and 2000),
+  added_by    uuid not null references public.profiles (id),
+  done        boolean not null default false,
+  due_date    date,
+  notes       text not null default '',
+  assigned_to uuid references public.profiles (id),
+  assigned_by uuid references public.profiles (id),
+  created_at  timestamptz not null default now()
 );
 create index list_items_channel_idx on public.list_items (channel_id);
+create index list_items_due_idx on public.list_items (due_date) where due_date is not null;
+create index list_items_assigned_idx on public.list_items (assigned_to) where assigned_to is not null;
 
 create table public.notes (
   id         uuid primary key default gen_random_uuid(),
@@ -143,17 +163,102 @@ create index notes_channel_idx on public.notes (channel_id);
 -- Payroll-sensitive: staff see only their own rows; owners of the
 -- team see everyone's. Enforced below — this is the one table where
 -- a policy mistake would leak wages, so its policies are the strictest.
+-- One row = one shift. Tips live here rather than in a pooling system
+-- because Fireweed splits them at the end of the shift — each person just
+-- records what they actually took home.
 create table public.hours_entries (
   id         uuid primary key default gen_random_uuid(),
   team_id    uuid not null references public.teams (id) on delete cascade,
   user_id    uuid not null references public.profiles (id) on delete cascade,
   date       date not null,
   hours      numeric(5, 2) not null check (hours > 0 and hours <= 24),
+  tips       numeric(10, 2) not null default 0 check (tips >= 0),
   note       text not null default '',
   created_at timestamptz not null default now()
 );
 create index hours_entries_team_idx on public.hours_entries (team_id, date);
 create index hours_entries_user_idx on public.hours_entries (user_id, date);
+
+-- ---------------------------------------------------------------
+-- Payroll
+-- ---------------------------------------------------------------
+
+-- Wage HISTORY, not a single mutable rate. A raise is a new row with a
+-- later effective_from, so a period already worked keeps costing what it
+-- actually cost. With one `wage` column per person instead, giving someone
+-- a raise would silently restate every past payroll — the exact thing a
+-- payroll record exists to prevent.
+create table public.wage_rates (
+  id             uuid primary key default gen_random_uuid(),
+  team_id        uuid not null references public.teams (id) on delete cascade,
+  user_id        uuid not null references public.profiles (id) on delete cascade,
+  rate           numeric(10,2) not null check (rate >= 0),
+  effective_from date not null,
+  created_by     uuid not null references public.profiles (id),
+  created_at     timestamptz not null default now(),
+  unique (user_id, effective_from)
+);
+create index wage_rates_lookup_idx on public.wage_rates (user_id, effective_from desc);
+
+-- A pay period. Fireweed runs calendar months, paid on the 15th of the
+-- following month. Totals are frozen onto pay_period_lines at mark-paid
+-- time so a later rate change or entry edit can't rewrite what was paid.
+-- Just the date-range container. Paid state lives on the LINES so one
+-- person can be settled early without freezing the rest of the team.
+create table public.pay_periods (
+  id           uuid primary key default gen_random_uuid(),
+  team_id      uuid not null references public.teams (id) on delete cascade,
+  period_start date not null,
+  period_end   date not null,
+  note         text not null default '',
+  created_at   timestamptz not null default now(),
+  unique (team_id, period_start, period_end),
+  check (period_end >= period_start)
+);
+
+-- Deliberately no `rate` column: someone can be paid at two different rates
+-- within one period, and a single number there would be a lie. Effective
+-- rate is gross/hours when a report needs to show one.
+create table public.pay_period_lines (
+  id            uuid primary key default gen_random_uuid(),
+  pay_period_id uuid not null references public.pay_periods (id) on delete cascade,
+  user_id       uuid not null references public.profiles (id),
+  hours         numeric(7,2) not null default 0,
+  gross         numeric(10,2) not null default 0,
+  tips          numeric(10,2) not null default 0,
+  paid_at       timestamptz,
+  paid_by       uuid references public.profiles (id),
+  unique (pay_period_id, user_id)
+);
+
+-- Owner-only notes about a teammate: hire date, raise history, anything
+-- personal. Deliberately NOT a column on team_members, whose select policy
+-- exposes rows to every teammate — these must stay private to the owner.
+create table public.staff_notes (
+  team_id    uuid not null references public.teams (id) on delete cascade,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  note       text not null default '',
+  updated_by uuid references public.profiles (id),
+  updated_at timestamptz not null default now(),
+  primary key (team_id, user_id)
+);
+
+-- Append-only trail of changes to the numbers that affect pay. changed_by
+-- is NULLABLE on purpose: auth.uid() is null for admin/CLI/service-role
+-- edits, and making it NOT NULL meant this trigger *rejected* those edits
+-- outright rather than recording them. Null = "changed out-of-band".
+create table public.hours_audit (
+  id         uuid primary key default gen_random_uuid(),
+  entry_id   uuid not null,           -- not a FK: the entry may be deleted
+  team_id    uuid not null references public.teams (id) on delete cascade,
+  entry_user uuid not null references public.profiles (id),
+  changed_by uuid references public.profiles (id),
+  action     text not null check (action in ('update','delete')),
+  old_hours  numeric(5,2),  new_hours numeric(5,2),
+  old_tips   numeric(10,2), new_tips  numeric(10,2),
+  changed_at timestamptz not null default now()
+);
+create index hours_audit_team_idx on public.hours_audit (team_id, changed_at desc);
 
 -- Per-user, per-message state for the Mentions inbox (read / archive /
 -- delete are personal — archiving a mention hides it for you only).
@@ -185,6 +290,8 @@ create table public.catalog_items (
   flavor     text not null default '',
   certs      text not null default '',
   notes      text not null default '',
+  source_url text not null default '',
+  cost       numeric(10,2),
   updated_by uuid not null references public.profiles (id),
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
@@ -202,7 +309,16 @@ create table public.orders (
   created_by   uuid not null references public.profiles (id),
   created_at   timestamptz not null default now(),
   delivered_by uuid references public.profiles (id),
-  delivered_at timestamptz
+  delivered_at timestamptz,
+  -- Distinct from `stage`: an order can be delivered but not yet invoiced.
+  -- stamp_order_update() below silently normalizes invoiced back to false
+  -- whenever stage isn't 'delivered' (e.g. un-delivering an invoiced order
+  -- un-invoices it too) — this constraint documents that invariant and
+  -- backstops any future code path that updates the row directly.
+  invoiced     boolean not null default false,
+  invoiced_by  uuid references public.profiles (id),
+  invoiced_at  timestamptz,
+  constraint orders_invoiced_requires_delivered check (not invoiced or stage = 'delivered')
 );
 create index orders_channel_idx on public.orders (channel_id, stage);
 
@@ -223,6 +339,46 @@ create table public.push_subscriptions (
   keys       jsonb not null,
   created_at timestamptz not null default now(),
   primary key (user_id, endpoint)
+);
+
+-- Focus Mode: on-demand pause (paused_until) and/or a recurring daily
+-- quiet-hours window. Window bounds are stored as UTC minutes-since-
+-- midnight — the client converts from the user's local time so the
+-- notify-push edge function can compare against UTC `now()` with no
+-- timezone lookup of its own. schedule_start_min > schedule_end_min
+-- means the window wraps past midnight UTC.
+create table public.focus_settings (
+  user_id            uuid primary key references public.profiles(id) on delete cascade,
+  paused_until       timestamptz,
+  schedule_enabled   boolean not null default false,
+  schedule_start_min smallint,
+  schedule_end_min   smallint,
+  updated_at         timestamptz not null default now()
+);
+
+-- Per-event opt-out for the "extra" push notifications (Focus Mode above
+-- is a blanket pause; this is per-event-type instead). Opt-OUT: an absent
+-- row means enabled, so a new teammate hears about a roast being ready
+-- without having to go find the switch first. Mentions and DMs are not
+-- covered here — those always come through.
+create table public.notify_prefs (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  event   text not null check (event in ('roast_ready','delivered','supply_added','task_assigned')),
+  enabled boolean not null default true,
+  primary key (user_id, event)
+);
+
+-- Gates who may create a brand-new team from scratch (as opposed to
+-- joining an existing one via invite code, which is unaffected). No RLS
+-- policies are defined here on purpose — with RLS enabled and zero
+-- policies, this table is unreadable/unwritable through the client API
+-- entirely, and is only ever consulted through can_create_team() below
+-- (SECURITY DEFINER), matching the is_team_member()/is_dm_member()
+-- pattern used throughout this schema. Add/remove rows via the CLI.
+create table public.team_creation_allowlist (
+  email      text primary key,
+  note       text,
+  created_at timestamptz not null default now()
 );
 
 -- ------------------------------------------------------------
@@ -286,6 +442,17 @@ returns boolean language sql stable security definer set search_path = public as
     from channel_members a
     join channel_members b using (channel_id)
     where a.user_id = auth.uid() and b.user_id = other
+  );
+$$;
+
+-- Is the caller's own email on the team-creation allowlist? Used only
+-- by teams_insert — joining an existing team via invite code (join_team)
+-- is a separate, already-scoped path and unaffected by this gate.
+create or replace function public.can_create_team()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from team_creation_allowlist
+    where lower(email) = lower(auth.email())
   );
 $$;
 
@@ -390,9 +557,10 @@ create trigger team_members_protect_last_owner
 create or replace function public.freeze_message_columns()
 returns trigger language plpgsql as $$
 begin
-  new.channel_id := old.channel_id;
-  new.user_id    := old.user_id;
-  new.created_at := old.created_at;
+  new.channel_id  := old.channel_id;
+  new.user_id     := old.user_id;
+  new.created_at  := old.created_at;
+  new.reply_to_id := old.reply_to_id;
   if new.text is distinct from old.text then
     new.edited := true;
   end if;
@@ -402,7 +570,9 @@ $$;
 create trigger messages_freeze before update on public.messages
   for each row execute function public.freeze_message_columns();
 
--- Staff may only flip `done` on list items — text and authorship stay.
+-- Original text/authorship are locked; done, due_date, notes, and the
+-- assignment fields stay open to the whole channel — same wiki-style trust
+-- model as notes and the catalog ("anyone can add or check off").
 create or replace function public.freeze_list_item_columns()
 returns trigger language plpgsql as $$
 begin
@@ -416,6 +586,71 @@ end;
 $$;
 create trigger list_items_freeze before update on public.list_items
   for each row execute function public.freeze_list_item_columns();
+
+-- Assigning a task pings that one person. AFTER trigger (not the freeze
+-- trigger above, which is BEFORE and only for locking columns) so it fires
+-- once the row is actually committed.
+create or replace function public.notify_task_assigned_trigger()
+returns trigger language plpgsql security definer
+set search_path = public, net
+as $$
+begin
+  if NEW.assigned_to is null then return NEW; end if;
+  if TG_OP = 'UPDATE' and NEW.assigned_to is not distinct from OLD.assigned_to then
+    return NEW;
+  end if;
+  if NEW.assigned_to = auth.uid() then return NEW; end if;
+  perform net.http_post(
+    url := 'https://vwacjfsalvbyokqvhzes.supabase.co/functions/v1/notify-push',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer <VITE_SUPABASE_ANON_KEY>',
+      'x-percolate-signature', '<NOTIFY_PUSH_SECRET>'
+    ),
+    body := jsonb_build_object('type', 'task_assigned', 'record', row_to_json(NEW))
+  );
+  return NEW;
+end;
+$$;
+create trigger notify_task_assigned
+  after insert or update on public.list_items
+  for each row execute function public.notify_task_assigned_trigger();
+
+-- When a primary slot opens up (someone removes their own signup), promote
+-- whoever has waited longest as an alternate for that same channel+date —
+-- otherwise the calendar shows an open slot someone already volunteered to
+-- fill, and staff have to notice and re-signup by hand. Verified against
+-- real signup data: promotes correctly, and a delete with no alternate
+-- queued is a harmless no-op.
+create or replace function public.promote_alternate_on_signup_delete()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  cap jsonb;
+  max_primary integer;
+  primary_count integer;
+  next_alt uuid;
+begin
+  if OLD.is_alternate then return OLD; end if;
+  select schedule_capacity -> extract(dow from OLD.date)::text
+    into cap from channels where id = OLD.channel_id;
+  if cap is null then return OLD; end if;
+  max_primary := (cap ->> 'max')::integer;
+  select count(*) into primary_count
+    from shift_signups
+    where channel_id = OLD.channel_id and date = OLD.date and not is_alternate;
+  if primary_count >= max_primary then return OLD; end if;
+  select id into next_alt
+    from shift_signups
+    where channel_id = OLD.channel_id and date = OLD.date and is_alternate
+    order by created_at asc limit 1;
+  if next_alt is not null then
+    update shift_signups set is_alternate = false where id = next_alt;
+  end if;
+  return OLD;
+end;
+$$;
+create trigger shift_signups_promote after delete on public.shift_signups
+  for each row execute function public.promote_alternate_on_signup_delete();
 
 create or replace function public.stamp_note_update()
 returns trigger language plpgsql as $$
@@ -445,8 +680,8 @@ $$;
 create trigger catalog_items_stamp before update on public.catalog_items
   for each row execute function public.stamp_catalog_update();
 
--- Orders: only the stage may change after creation; delivered_by/at are
--- stamped by the database, not the client.
+-- Orders: only stage and invoiced may change after creation; the by/at
+-- pairs for both are stamped by the database, not the client.
 create or replace function public.stamp_order_update()
 returns trigger language plpgsql as $$
 begin
@@ -460,6 +695,19 @@ begin
   elsif new.stage <> 'delivered' then
     new.delivered_by := null;
     new.delivered_at := null;
+    -- Un-delivering an invoiced order un-invoices it too — without this
+    -- the row would violate orders_invoiced_requires_delivered instead of
+    -- just quietly correcting itself.
+    new.invoiced    := false;
+    new.invoiced_by := null;
+    new.invoiced_at := null;
+  end if;
+  if new.invoiced and not old.invoiced then
+    new.invoiced_by := coalesce(auth.uid(), old.invoiced_by);
+    new.invoiced_at := now();
+  elsif not new.invoiced then
+    new.invoiced_by := null;
+    new.invoiced_at := null;
   end if;
   return new;
 end;
@@ -504,6 +752,70 @@ $$;
 create trigger hours_entries_freeze before update on public.hours_entries
   for each row execute function public.freeze_hours_columns();
 
+-- The wage in force on a given day: the most recent rate effective on or
+-- before it. Costing an entry with this (rather than the person's current
+-- rate) is what keeps a raise from restating past payroll.
+create or replace function public.rate_on(p_user uuid, p_date date)
+returns numeric language sql stable security definer set search_path = public as $$
+  select rate from wage_rates
+  where user_id = p_user and effective_from <= p_date
+  order by effective_from desc
+  limit 1;
+$$;
+
+create or replace function public.log_hours_change()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'UPDATE' then
+    -- Only record changes to the numbers that actually affect pay.
+    if new.hours is distinct from old.hours or new.tips is distinct from old.tips then
+      insert into hours_audit (entry_id, team_id, entry_user, changed_by, action,
+                               old_hours, new_hours, old_tips, new_tips)
+      values (old.id, old.team_id, old.user_id, auth.uid(), 'update',
+              old.hours, new.hours, old.tips, new.tips);
+    end if;
+    return new;
+  end if;
+  insert into hours_audit (entry_id, team_id, entry_user, changed_by, action,
+                           old_hours, old_tips)
+  values (old.id, old.team_id, old.user_id, auth.uid(), 'delete', old.hours, old.tips);
+  return old;
+end;
+$$;
+create trigger hours_audit_trg after update or delete on public.hours_entries
+  for each row execute function public.log_hours_change();
+
+-- Once a period is marked paid its entries freeze. Without this the
+-- timesheet drifts away from the payment record computed from it, and the
+-- two can never be reconciled again. Reopening the period (clearing
+-- paid_at) unlocks them.
+create or replace function public.block_paid_period_edits()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  d date; t uuid; u uuid;
+begin
+  if tg_op = 'DELETE' then d := old.date; t := old.team_id; u := old.user_id;
+  else d := coalesce(new.date, old.date); t := old.team_id; u := old.user_id;
+  end if;
+  if exists (
+    select 1
+    from pay_period_lines l
+    join pay_periods p on p.id = l.pay_period_id
+    where p.team_id = t
+      and l.user_id = u
+      and l.paid_at is not null
+      and d between p.period_start and p.period_end
+  ) then
+    raise exception 'That person has already been paid for this period. Reopen their line first.'
+      using errcode = 'check_violation';
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+create trigger hours_paid_lock before update or delete on public.hours_entries
+  for each row execute function public.block_paid_period_edits();
+
 -- ------------------------------------------------------------
 -- Row-Level Security
 -- ------------------------------------------------------------
@@ -527,6 +839,14 @@ alter table public.list_items         enable row level security;
 alter table public.notes              enable row level security;
 alter table public.hours_entries      enable row level security;
 alter table public.push_subscriptions enable row level security;
+alter table public.focus_settings     enable row level security;
+alter table public.notify_prefs       enable row level security;
+alter table public.wage_rates         enable row level security;
+alter table public.pay_periods        enable row level security;
+alter table public.pay_period_lines   enable row level security;
+alter table public.hours_audit        enable row level security;
+alter table public.staff_notes        enable row level security;
+alter table public.team_creation_allowlist enable row level security;
 
 -- The app requires login; the anonymous role gets nothing at all.
 revoke all on all tables in schema public from anon;
@@ -543,7 +863,7 @@ create policy profiles_update on public.profiles for update
 create policy teams_select on public.teams for select
   using (public.is_team_member(id));
 create policy teams_insert on public.teams for insert
-  with check (created_by = auth.uid());
+  with check (created_by = auth.uid() and public.can_create_team());
 create policy teams_update on public.teams for update
   using (public.is_team_owner(id));
 create policy teams_delete on public.teams for delete
@@ -567,7 +887,10 @@ create policy team_members_delete on public.team_members for delete
 
 -- channels ---------------------------------------------------
 create policy channels_select on public.channels for select
-  using (public.is_team_member(team_id));
+  using (
+    (team_id is not null and public.is_team_member(team_id))
+    or (type = 'dm' and public.is_dm_member(id))
+  );
 create policy channels_insert on public.channels for insert
   with check (team_id is not null and public.is_team_owner(team_id));
   -- DM channels are created only by open_dm(), never directly.
@@ -609,6 +932,11 @@ create policy shift_signups_insert on public.shift_signups for insert
   with check (user_id = auth.uid() and public.can_see_channel(channel_id));
 create policy shift_signups_delete on public.shift_signups for delete
   using (user_id = auth.uid() or public.is_owner_of_channel(channel_id));
+-- Deliberately NO update policy: a signup is insert-or-delete only through
+-- the API. promote_alternate_on_signup_delete() flips is_alternate itself,
+-- but it's SECURITY DEFINER (owned by postgres, the table owner), so it
+-- bypasses RLS and needs no policy — and without one, nobody can edit a
+-- row to jump the staffing cap or move a signup to another day.
 
 -- list_items ---------------------------------------------------
 create policy list_items_select on public.list_items for select
@@ -635,10 +963,13 @@ create policy hours_select on public.hours_entries for select
   using (user_id = auth.uid() or public.is_team_owner(team_id));
 create policy hours_insert on public.hours_entries for insert
   with check (user_id = auth.uid() and public.is_team_member(team_id));
+-- Owners can correct staff entries (a fat-fingered 80 instead of 8 is the
+-- owner's problem to fix at payroll time), and every change they make is
+-- recorded in hours_audit by the trigger above.
 create policy hours_update on public.hours_entries for update
-  using (user_id = auth.uid());
+  using (user_id = auth.uid() or public.is_team_owner(team_id));
 create policy hours_delete on public.hours_entries for delete
-  using (user_id = auth.uid());
+  using (user_id = auth.uid() or public.is_team_owner(team_id));
 
 -- channel_members (DM rosters; writes happen only inside open_dm) ---
 create policy channel_members_select on public.channel_members for select
@@ -703,8 +1034,65 @@ create policy order_items_delete on public.order_items for delete
     )
   );
 
+-- payroll ------------------------------------------------------
+-- Your own rate is visible to you; only owners see the team's, and only
+-- owners set them.
+create policy wage_rates_select on public.wage_rates for select
+  using (user_id = auth.uid() or public.is_team_owner(team_id));
+create policy wage_rates_insert on public.wage_rates for insert
+  with check (public.is_team_owner(team_id) and created_by = auth.uid());
+create policy wage_rates_update on public.wage_rates for update
+  using (public.is_team_owner(team_id));
+create policy wage_rates_delete on public.wage_rates for delete
+  using (public.is_team_owner(team_id));
+
+create policy pay_periods_select on public.pay_periods for select
+  using (public.is_team_member(team_id));
+create policy pay_periods_insert on public.pay_periods for insert
+  with check (public.is_team_owner(team_id));
+create policy pay_periods_update on public.pay_periods for update
+  using (public.is_team_owner(team_id));
+create policy pay_periods_delete on public.pay_periods for delete
+  using (public.is_team_owner(team_id));
+
+-- Staff see their own payslip line and nobody else's.
+create policy pay_period_lines_select on public.pay_period_lines for select
+  using (
+    user_id = auth.uid()
+    or exists (select 1 from pay_periods p
+               where p.id = pay_period_id and public.is_team_owner(p.team_id))
+  );
+create policy pay_period_lines_write on public.pay_period_lines for all
+  using (exists (select 1 from pay_periods p
+                 where p.id = pay_period_id and public.is_team_owner(p.team_id)))
+  with check (exists (select 1 from pay_periods p
+                      where p.id = pay_period_id and public.is_team_owner(p.team_id)));
+
+-- Read-only through the API — rows are written by the definer trigger, so
+-- history can't be forged or edited.
+create policy hours_audit_select on public.hours_audit for select
+  using (entry_user = auth.uid() or public.is_team_owner(team_id));
+
+-- Owner-only, in both directions: staff can't read notes written about them.
+create policy staff_notes_all on public.staff_notes for all
+  using (public.is_team_owner(team_id))
+  with check (public.is_team_owner(team_id));
+
 -- push_subscriptions (strictly own rows) ------------------------
 create policy push_subs_all on public.push_subscriptions for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- focus_settings (strictly own row; the notify-push edge function
+-- reads across users via its service-role key, bypassing RLS) -----
+create policy focus_settings_select on public.focus_settings for select
+  using (user_id = auth.uid());
+create policy focus_settings_insert on public.focus_settings for insert
+  with check (user_id = auth.uid());
+create policy focus_settings_update on public.focus_settings for update
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- notify_prefs (strictly own row; edge function reads via service role) --
+create policy notify_prefs_all on public.notify_prefs for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- ------------------------------------------------------------
@@ -808,3 +1196,152 @@ alter publication supabase_realtime add table
   public.mention_meta,
   public.channel_reads,
   public.hours_entries;
+
+-- ------------------------------------------------------------
+-- Push notifications: messages INSERT -> notify-push edge function
+--
+-- Created out-of-band originally (this section documents it so a
+-- rebuild from this file doesn't silently lose push). Uses pg_net
+-- directly rather than the supabase_functions.http_request() helper,
+-- because that schema only gets provisioned once a Database Webhook
+-- has been created through the dashboard UI, which never happened here.
+--
+-- SECURITY: the Authorization header below carries the *anon* key, which
+-- also ships in the browser bundle — so it proves nothing about the
+-- caller. The x-percolate-signature header is what actually
+-- authenticates the database to the function; the function rejects
+-- anything without it (403). Without that check, any client could POST a
+-- forged `record` and push arbitrary text to a channel under any
+-- sender's name. Keep the two in sync:
+--   supabase secrets set NOTIFY_PUSH_SECRET=<value>   (function side)
+--   the literal in this function body                 (database side)
+-- Never commit the real value — replace the placeholder when applying.
+-- ------------------------------------------------------------
+
+create extension if not exists pg_net with schema extensions;
+
+create or replace function public.notify_push_trigger()
+returns trigger language plpgsql security definer
+set search_path = public, net
+as $BODY$
+begin
+  perform net.http_post(
+    url := 'https://vwacjfsalvbyokqvhzes.supabase.co/functions/v1/notify-push',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer <VITE_SUPABASE_ANON_KEY>',
+      'x-percolate-signature', '<NOTIFY_PUSH_SECRET>'
+    ),
+    body := jsonb_build_object('record', row_to_json(NEW))
+  );
+  return NEW;
+end;
+$BODY$;
+
+drop trigger if exists notify_push_on_message on public.messages;
+create trigger notify_push_on_message
+  after insert on public.messages
+  for each row execute function public.notify_push_trigger();
+
+-- Someone accepted an invite code -> tell that team's owners. Same edge
+-- function, same shared secret; the `type` field is what routes it. (The
+-- message trigger above omits `type`, and the function treats a missing
+-- one as "message", so the two can deploy independently.)
+create or replace function public.notify_member_joined_trigger()
+returns trigger language plpgsql security definer
+set search_path = public, net
+as $BODY$
+begin
+  -- The owner row written alongside a brand-new team isn't a "join" —
+  -- without this, creating a team would notify you about yourself.
+  if NEW.role = 'owner' then
+    return NEW;
+  end if;
+  perform net.http_post(
+    url := 'https://vwacjfsalvbyokqvhzes.supabase.co/functions/v1/notify-push',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer <VITE_SUPABASE_ANON_KEY>',
+      'x-percolate-signature', '<NOTIFY_PUSH_SECRET>'
+    ),
+    body := jsonb_build_object('type', 'member_joined', 'record', row_to_json(NEW))
+  );
+  return NEW;
+end;
+$BODY$;
+
+drop trigger if exists notify_member_joined on public.team_members;
+create trigger notify_member_joined
+  after insert on public.team_members
+  for each row execute function public.notify_member_joined_trigger();
+
+
+-- ------------------------------------------------------------
+-- Data retention
+-- ------------------------------------------------------------
+-- Deliberately scoped to MESSAGES only. Hours entries are payroll/tax
+-- records, notes are reference material, catalog and orders are business
+-- records — none of those should evaporate on a timer. Pinned messages are
+-- also exempt: pinning is an explicit "keep this".
+--
+-- Requires pg_cron. The nightly job is registered with:
+--   select cron.schedule('percolate-purge-messages', '17 4 * * *',
+--                        'select public.purge_old_messages();');
+
+create extension if not exists pg_cron;
+
+create or replace function public.retention_cutoffs()
+returns table (channel_id uuid, cutoff timestamptz)
+language sql stable security definer set search_path = public as $$
+  -- Team channels follow their own team's policy.
+  select c.id, now() - make_interval(days => t.retention_days)
+  from channels c
+  join teams t on t.id = c.team_id
+  where t.retention_days is not null
+  union all
+  -- DMs have no team_id, so they inherit the SHORTEST policy among the
+  -- teams their participants belong to — privacy-protective if the two
+  -- sides ever disagree.
+  select cm.channel_id, now() - make_interval(days => min(t.retention_days))
+  from channel_members cm
+  join team_members tm on tm.user_id = cm.user_id
+  join teams t on t.id = tm.team_id
+  where t.retention_days is not null
+  group by cm.channel_id;
+$$;
+
+create or replace function public.purge_old_messages()
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  with doomed as (
+    delete from messages m
+    using public.retention_cutoffs() cu
+    where m.channel_id = cu.channel_id
+      and m.created_at < cu.cutoff
+      and not exists (select 1 from pins p where p.message_id = m.id)
+    returning 1
+  )
+  select count(*) into n from doomed;
+  return coalesce(n, 0);
+end;
+$$;
+
+-- Dry run for the settings screen, so an owner sees the scope of a
+-- deletion BEFORE committing to it rather than discovering it after.
+create or replace function public.count_purgeable_messages()
+returns integer language sql stable security definer set search_path = public as $$
+  select count(*)::integer
+  from messages m
+  join public.retention_cutoffs() cu on cu.channel_id = m.channel_id
+  join channels c on c.id = m.channel_id
+  where m.created_at < cu.cutoff
+    and not exists (select 1 from pins p where p.message_id = m.id)
+    and c.team_id is not null
+    and public.is_team_owner(c.team_id);
+$$;
+
+-- Only the cron job (running as the table owner) may actually delete.
+revoke execute on function public.purge_old_messages() from public, anon, authenticated;
+revoke execute on function public.count_purgeable_messages() from public, anon;
+grant execute on function public.count_purgeable_messages() to authenticated;

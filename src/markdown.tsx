@@ -1,10 +1,11 @@
 import React from 'react';
 import { useStore } from './store';
+import { channelSlug, useOpenChannel } from './nav';
 
 // Tiny, safe markdown renderer. Builds React elements directly (never
 // innerHTML), so message text can't inject markup. Supports:
 // **bold**, *italic*, `code`, - bullets, [ ] / [x] task lists,
-// [label](url), bare URLs, and @mentions.
+// [label](url), bare URLs, @mentions, and #channel links.
 
 // A checklist line: "- [ ] item" or "- [x] item".
 const TASK_RE = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/;
@@ -26,12 +27,14 @@ export function toggleTaskInText(text: string, taskIndex: number): string {
 }
 
 const INLINE =
-  /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>"']+|@[A-Za-z0-9_]+)/g;
+  /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>"']+|@[A-Za-z0-9_]+|#[A-Za-z0-9][A-Za-z0-9_-]*)/g;
 
 function renderInline(
   text: string,
   keyBase: string,
-  mentionNames: Set<string>
+  mentionNames: Set<string>,
+  channelsBySlug: Map<string, { id: string; name: string; emoji: string }>,
+  openChannel: ((id: string) => void) | null
 ): React.ReactNode[] {
   const out: React.ReactNode[] = [];
   let last = 0;
@@ -55,6 +58,27 @@ function renderInline(
           </span>
         );
       } else {
+        out.push(tok);
+      }
+    } else if (tok.startsWith('#')) {
+      const ch = channelsBySlug.get(channelSlug(tok.slice(1)));
+      if (ch && openChannel) {
+        out.push(
+          <button
+            key={key}
+            type="button"
+            className="chan-link"
+            onClick={(e) => {
+              e.stopPropagation(); // don't also trigger the bubble's tap menu
+              openChannel(ch.id);
+            }}
+          >
+            {ch.emoji} {ch.name}
+          </button>
+        );
+      } else {
+        // Unknown channel (or nowhere to navigate) stays literal text —
+        // better a plain #word than a button that goes nowhere.
         out.push(tok);
       }
     } else if (tok.startsWith('[')) {
@@ -91,6 +115,17 @@ export function Markdown({
   onToggleTask?: (taskIndex: number) => void;
 }) {
   const { state } = useStore();
+  const openChannel = useOpenChannel();
+  // Only real team channels are linkable — DM threads are 'private' and
+  // shouldn't be addressable by name.
+  const channelsBySlug = React.useMemo(() => {
+    const m = new Map<string, { id: string; name: string; emoji: string }>();
+    for (const c of state.channels) {
+      if (c.teamId !== state.currentTeamId || c.type === 'dm') continue;
+      m.set(channelSlug(c.name), { id: c.id, name: c.name, emoji: c.emoji });
+    }
+    return m;
+  }, [state.channels, state.currentTeamId]);
   const mentionNames = React.useMemo(
     () =>
       new Set([
@@ -135,7 +170,7 @@ export function Markdown({
           ) : (
             <span className={'task-check' + (checked ? ' task-on' : '')}>{box}</span>
           )}
-          <span className="task-text">{renderInline(task[4], `t${i}`, mentionNames)}</span>
+          <span className="task-text">{renderInline(task[4], `t${i}`, mentionNames, channelsBySlug, openChannel)}</span>
         </li>
       );
       return;
@@ -143,13 +178,13 @@ export function Markdown({
     const m = line.match(/^\s*[-*]\s+(.*)/);
     if (m) {
       bullets.push(
-        <li key={`li${i}`}>{renderInline(m[1], `l${i}`, mentionNames)}</li>
+        <li key={`li${i}`}>{renderInline(m[1], `l${i}`, mentionNames, channelsBySlug, openChannel)}</li>
       );
     } else {
       flush(`ul${i}`);
       if (line.trim())
         blocks.push(
-          <p key={`p${i}`}>{renderInline(line, `p${i}`, mentionNames)}</p>
+          <p key={`p${i}`}>{renderInline(line, `p${i}`, mentionNames, channelsBySlug, openChannel)}</p>
         );
     }
   });

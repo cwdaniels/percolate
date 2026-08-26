@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { useStore, favoritesFor, MAX_FAVORITES } from '../store';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useStore, favoritesFor, orderedChannelIds, fmtDate, MAX_FAVORITES } from '../store';
+import type { Message } from '../types';
 
 const CHANNEL_EMOJI = ['💬', '📦', '🔥', '📖', '📅', '🧾', '🎉', '🛠️', '🚚', '🧊', '🌱', '☕️'];
 
@@ -21,7 +22,8 @@ export type OpenTarget = {
 };
 
 export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
-  const { state, me, switchTeam, addTeam, addChannel, toggleFavorite } = useStore();
+  const { state, me, switchTeam, addTeam, addChannel, toggleFavorite, moveChannel, searchMessages } =
+    useStore();
   const team = state.teams.find((t) => t.id === state.currentTeamId) ?? state.teams[0];
   const channels = state.channels.filter((c) => c.teamId === team.id);
   const [showTeams, setShowTeams] = useState(false);
@@ -35,10 +37,26 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
   const [editFav, setEditFav] = useState(false);
 
   const favIds = favoritesFor(state, me.id);
-  const favChannels = favIds
+  const orderedIds = orderedChannelIds(state, me.id, channels.map((c) => c.id));
+  const orderedChannels = orderedIds
     .map((id) => channels.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => !!c);
-  const restChannels = channels.filter((c) => !favIds.includes(c.id));
+  const favChannels = orderedChannels.filter((c) => favIds.includes(c.id));
+  const restChannels = orderedChannels.filter((c) => !favIds.includes(c.id));
+
+  // Checklist items assigned to ME, due today or overdue — deliberately
+  // narrower than "everything assigned to me" so this stays an urgent nudge
+  // rather than a second inbox. Distinct icon/color from the orders strip
+  // below so the two are readable at a glance, not just by position.
+  const todayStr = fmtDate(new Date());
+  const myUrgentTasks = state.listItems.filter(
+    (i) =>
+      i.assignedTo === me.id &&
+      !i.done &&
+      i.dueDate &&
+      i.dueDate <= todayStr &&
+      channels.some((c) => c.id === i.channelId)
+  );
 
   // Orders anywhere on this team that are roasted and waiting on a run —
   // the one thing worth a banner because someone has to physically act.
@@ -114,6 +132,35 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
     return { text, urgent };
   };
 
+  // Server-side message hits. Everything else the search covers (notes,
+  // beans, list items, orders) is fully loaded already — messages are the
+  // one table held to a window, so they're the only thing worth a round
+  // trip. Debounced so typing doesn't fire a query per keystroke.
+  const [remoteMsgs, setRemoteMsgs] = useState<Message[]>([]);
+  useEffect(() => {
+    const needle = q.trim();
+    if (needle.length < 2) {
+      setRemoteMsgs([]);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      searchMessages(needle).then((found) => {
+        if (alive) setRemoteMsgs(found);
+      });
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // Deliberately keyed on the query alone. `searchMessages` is a fresh
+    // closure on every render (the store rebuilds its api object each time),
+    // so including it would re-fire this effect on every render — and since
+    // each result is a new array, that would loop: query → setState →
+    // render → query. The function is stateless, so a stale closure is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
   // Global search across everything the current user can see.
   type Result = { key: string; emoji: string; title: string; sub: string; go: OpenTarget };
   const results = useMemo<Result[]>(() => {
@@ -136,7 +183,14 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
     for (const c of channels.filter((c) => hit(c.name) || hit(c.description))) {
       out.push({ key: 'c' + c.id, emoji: c.emoji, title: c.name, sub: 'Channel', go: { id: c.id } });
     }
-    for (const m of state.messages.filter((m) => visible(m.channelId) && hit(m.text)).slice(-8).reverse()) {
+    // Local hits appear instantly; server hits (which reach past the loaded
+    // window) merge in when they land. Dedupe by id, newest first.
+    const byId = new Map<string, (typeof state.messages)[number]>();
+    for (const m of state.messages) if (visible(m.channelId) && hit(m.text)) byId.set(m.id, m);
+    for (const m of remoteMsgs) if (visible(m.channelId)) byId.set(m.id, m);
+    const msgHits = [...byId.values()].sort((a, b) => b.ts - a.ts).slice(0, 8);
+
+    for (const m of msgHits) {
       const who = state.users.find((u) => u.id === m.userId)?.name ?? '?';
       out.push({
         key: 'm' + m.id,
@@ -187,7 +241,7 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
       });
     }
     return out.slice(0, 24);
-  }, [q, channels, state, me.id]);
+  }, [q, channels, state, me.id, remoteMsgs]);
 
   return (
     <div className="screen">
@@ -248,23 +302,42 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
             </button>
           </div>
           <div className="list-group">
-            {channels.map((c) => {
+            {orderedChannels.map((c, idx) => {
               const on = favIds.includes(c.id);
               const disabled = !on && favIds.length >= MAX_FAVORITES;
               return (
-                <button
-                  key={c.id}
-                  className={'row fav-row' + (disabled ? ' fav-disabled' : '')}
-                  onClick={() => !disabled && toggleFavorite(c.id)}
-                >
-                  <span className={'fav-star' + (on ? ' fav-on' : '')}>
-                    {on ? '★' : '☆'}
-                  </span>
-                  <span className="row-emoji">{c.emoji}</span>
-                  <span className="row-body">
-                    <span className="row-title">{c.name}</span>
-                  </span>
-                </button>
+                <div key={c.id} className={'row fav-row' + (disabled ? ' fav-disabled' : '')}>
+                  <button
+                    className="fav-row-main"
+                    onClick={() => !disabled && toggleFavorite(c.id)}
+                  >
+                    <span className={'fav-star' + (on ? ' fav-on' : '')}>
+                      {on ? '★' : '☆'}
+                    </span>
+                    <span className="row-emoji">{c.emoji}</span>
+                    <span className="row-body">
+                      <span className="row-title">{c.name}</span>
+                    </span>
+                  </button>
+                  <div className="fav-move">
+                    <button
+                      className="fav-move-btn"
+                      disabled={idx === 0}
+                      onClick={() => moveChannel(c.id, 'up')}
+                      aria-label={`Move ${c.name} up`}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      className="fav-move-btn"
+                      disabled={idx === orderedChannels.length - 1}
+                      onClick={() => moveChannel(c.id, 'down')}
+                      aria-label={`Move ${c.name} down`}
+                    >
+                      ▼
+                    </button>
+                  </div>
+                </div>
               );
             })}
             {me.role === 'admin' && (
@@ -278,11 +351,32 @@ export function Home({ onOpen }: { onOpen: (t: OpenTarget) => void }) {
             )}
           </div>
           <p className="footnote">
-            Star a channel to pin it as a tile · tap ＋ to make a new one.
+            Star a channel to pin it as a tile · use ▲▼ to reorder · tap ＋ to make a new one.
           </p>
         </div>
       ) : (
         <>
+          {myUrgentTasks.length > 0 && (
+            <button
+              className="attn-strip attn-strip-tasks"
+              onClick={() => onOpen({ id: myUrgentTasks[0].channelId, view: 'board' })}
+            >
+              <span className="attn-emoji">📌</span>
+              <span className="attn-text">
+                <strong>
+                  {myUrgentTasks.length} task{myUrgentTasks.length === 1 ? '' : 's'} on you
+                </strong>{' '}
+                —{' '}
+                {myUrgentTasks
+                  .map((t) => t.text.replace(/[*`#]/g, ''))
+                  .slice(0, 2)
+                  .join(', ')}
+                {myUrgentTasks.length > 2 ? '…' : ''}
+              </span>
+              <span className="chevron">›</span>
+            </button>
+          )}
+
           {readyOrders.length > 0 && (
             <button
               className="attn-strip"

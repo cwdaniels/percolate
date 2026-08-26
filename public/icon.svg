@@ -1,8 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-  <rect width="180" height="180" rx="40" fill="#b5562c"/>
-  <g fill="none" stroke="#fdf3e7" stroke-width="9" stroke-linecap="round">
-    <path d="M52 78h58v28a26 26 0 0 1-26 26H78a26 26 0 0 1-26-26V78z" fill="#fdf3e7" stroke="none"/>
-    <path d="M110 84h10a14 14 0 0 1 0 28h-10"/>
-    <path d="M66 62c0-8 8-8 8-16M88 62c0-8 8-8 8-16"/>
-  </g>
+  <defs>
+    <linearGradient id="roast" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="180">
+      <stop offset="0" stop-color="#c96a33"/>
+      <stop offset="1" stop-color="#a0451f"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" rx="40" fill="url(#roast)"/>
+
+  <path d="M34 44H76A8 8 0 0 1 84 52V70A8 8 0 0 1 76 78H70L76 108 48 78H34A8 8 0 0 1 26 70V52A8 8 0 0 1 34 44Z" fill="#fdf3e7"/>
+
+  <path d="M68 22H110A8 8 0 0 1 118 30V50A8 8 0 0 1 110 58H102L90 108 80 58H68A8 8 0 0 1 60 50V30A8 8 0 0 1 68 22Z" fill="none" stroke="url(#roast)" stroke-width="6"/>
+  <path d="M68 22H110A8 8 0 0 1 118 30V50A8 8 0 0 1 110 58H102L90 108 80 58H68A8 8 0 0 1 60 50V30A8 8 0 0 1 68 22Z" fill="#fdf3e7"/>
+
+  <path d="M108 52H142A8 8 0 0 1 150 60V76A8 8 0 0 1 142 84H132L106 108 112 84H108A8 8 0 0 1 100 76V60A8 8 0 0 1 108 52Z" fill="none" stroke="url(#roast)" stroke-width="6"/>
+  <path d="M108 52H142A8 8 0 0 1 150 60V76A8 8 0 0 1 142 84H132L106 108 112 84H108A8 8 0 0 1 100 76V60A8 8 0 0 1 108 52Z" fill="#fdf3e7"/>
+
+  <path d="M118 120c22 0 22 22 0 22" fill="none" stroke="#fdf3e7" stroke-width="8" stroke-linecap="round"/>
+  <path d="M62 112v22q0 16 16 16h24q16 0 16-16v-22z" fill="#fdf3e7"/>
+  <ellipse cx="90" cy="112" rx="28" ry="7.5" fill="#fdf3e7"/>
+  <ellipse cx="90" cy="112" rx="21" ry="4.5" fill="url(#roast)"/>
+  <path d="M67 119A24 7 0 0 0 113 119" fill="none" stroke="url(#roast)" stroke-width="3" stroke-linecap="round"/>
 </svg>

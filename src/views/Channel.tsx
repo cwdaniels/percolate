@@ -188,7 +188,7 @@ export function ChannelView({
       ) : view === 'notes' ? (
         <NotesBoard channel={channel} initialOpenId={initialNoteId} />
       ) : channel.type === 'schedule' ? (
-        <ScheduleBoard channel={channel} />
+        <ScheduleBoard channel={channel} onOpen={onOpen} />
       ) : channel.type === 'catalog' ? (
         <CatalogBoard channel={channel} />
       ) : channel.type === 'orders' ? (
@@ -216,7 +216,7 @@ function Chat({
   channel: Channel;
   onOpen?: (id: string, view?: ChannelViewMode) => void;
 }) {
-  const { state, me, send, togglePin, editMessage, toggleReaction, markThreadRead } =
+  const { state, me, send, togglePin, editMessage, deleteMessage, toggleReaction, markThreadRead } =
     useStore();
   const msgs = state.messages
     .filter((m) => m.channelId === channel.id)
@@ -244,7 +244,23 @@ function Chat({
   const [showPinned, setShowPinned] = useState(false);
   const [showFeed, setShowFeed] = useState(true);
   const [toast, setToast] = useState('');
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const msgsRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const startReply = (m: Message) => {
+    setSelected(null);
+    setReplyTo(m);
+    composerRef.current?.focus();
+  };
+
+  const jumpToMessage = (id: string) => {
+    const el = document.getElementById('msg-' + id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('msg-flash');
+    setTimeout(() => el.classList.remove('msg-flash'), 1200);
+  };
 
   const startEdit = (m: Message) => {
     setSelected(null);
@@ -257,6 +273,21 @@ function Chat({
     setEditingId(null);
     setEditText('');
   };
+
+  // Read receipts, private threads only (a deliberate scope choice: team
+  // channels never expose who has read what). Shown on the newest message
+  // I sent — that's the one you actually wonder about.
+  const lastMineId = [...msgs].reverse().find((m) => m.userId === me.id)?.id;
+  const seenBy = (() => {
+    if (channel.type !== 'dm' || !lastMineId) return [];
+    const msg = msgs.find((m) => m.id === lastMineId);
+    if (!msg) return [];
+    return (channel.memberIds ?? [])
+      .filter((id) => id !== me.id)
+      .filter((id) => (state.threadReadAt[id]?.[channel.id] ?? 0) >= msg.ts)
+      .map((id) => state.users.find((u) => u.id === id)?.name)
+      .filter((n): n is string => !!n);
+  })();
 
   const pinned = msgs.filter((m) => m.pinned);
 
@@ -321,10 +352,32 @@ function Chat({
     setText(text.replace(/@\w*$/, `@${name} `));
   };
 
+  // #channel autocomplete, same shape as @mentions. Inserts the name with
+  // spaces stripped so "Coffee Shops" becomes a single #CoffeeShops token —
+  // the renderer resolves it back by slug.
+  const chanMatch = text.match(/#([A-Za-z0-9_-]*)$/);
+  const chanQuery = chanMatch ? chanMatch[1].toLowerCase() : null;
+  const channelSuggestions =
+    chanQuery !== null
+      ? state.channels
+          .filter(
+            (c) =>
+              c.teamId === channel.teamId &&
+              c.type !== 'dm' &&
+              c.id !== channel.id &&
+              c.name.toLowerCase().replace(/[^a-z0-9]/g, '').startsWith(chanQuery)
+          )
+          .slice(0, 4)
+      : [];
+
+  const applyChannel = (name: string) => {
+    setText(text.replace(/#[A-Za-z0-9_-]*$/, `#${name.replace(/[^A-Za-z0-9]/g, '')} `));
+  };
+
   const submit = () => {
     const t = text.trim();
     if (!t) return;
-    send(channel.id, t);
+    send(channel.id, t, replyTo?.id);
     const mentioned = state.users
       .filter((u) => new RegExp(`@${u.name}\\b`, 'i').test(t))
       .map((u) => u.name);
@@ -334,6 +387,7 @@ function Chat({
       setTimeout(() => setToast(''), 3000);
     }
     setText('');
+    setReplyTo(null);
   };
 
   return (
@@ -395,8 +449,9 @@ function Chat({
           const newGroup =
             !prev || prev.userId !== m.userId || m.ts - prev.ts > 5 * 60 * 1000;
           const mine = m.userId === me.id;
+          const quoted = m.replyToId ? msgs.find((x) => x.id === m.replyToId) : undefined;
           return (
-            <div key={m.id} className={'msg-row' + (mine ? ' mine' : '')}>
+            <div key={m.id} id={'msg-' + m.id} className={'msg-row' + (mine ? ' mine' : '')}>
               {!mine && (
                 <div className="msg-avatar">
                   {newGroup && user && <Avatar user={user} size={30} />}
@@ -414,6 +469,19 @@ function Chat({
                     </span>
                     {m.pinned && <span className="msg-pin-flag">📌</span>}
                   </div>
+                )}
+                {quoted && (
+                  <button
+                    className={'msg-quote' + (mine ? ' msg-quote-mine' : '')}
+                    onClick={() => jumpToMessage(quoted.id)}
+                  >
+                    <span className="msg-quote-author">
+                      {state.users.find((u) => u.id === quoted.userId)?.name ?? '?'}
+                    </span>
+                    <span className="msg-quote-text">
+                      {quoted.text.length > 80 ? quoted.text.slice(0, 80) + '…' : quoted.text}
+                    </span>
+                  </button>
                 )}
                 {editingId === m.id ? (
                   <div className="edit-box">
@@ -464,6 +532,9 @@ function Chat({
                     ))}
                   </div>
                 )}
+                {m.id === lastMineId && seenBy.length > 0 && (
+                  <span className="read-receipt">Seen by {seenBy.join(', ')}</span>
+                )}
                 {selected === m.id && editingId !== m.id && (
                   <div className="msg-actions">
                     <div className="react-row">
@@ -481,7 +552,21 @@ function Chat({
                       ))}
                     </div>
                     <div className="action-row">
+                      <button onClick={() => startReply(m)}>↩ Reply</button>
                       {mine && <button onClick={() => startEdit(m)}>Edit</button>}
+                      {mine && (
+                        <button
+                          className="danger"
+                          onClick={() => {
+                            if (window.confirm('Delete this message? This can’t be undone.')) {
+                              deleteMessage(m.id);
+                            }
+                            setSelected(null);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           togglePin(m.id);
@@ -502,10 +587,38 @@ function Chat({
       {toast && <div className="toast">{toast}</div>}
 
       <div className="composer">
+        {replyTo && (
+          <div className="reply-preview">
+            <div className="reply-preview-body">
+              <span className="reply-preview-author">
+                ↩ Replying to {state.users.find((u) => u.id === replyTo.userId)?.name ?? '?'}
+              </span>
+              <span className="reply-preview-text">
+                {replyTo.text.length > 80 ? replyTo.text.slice(0, 80) + '…' : replyTo.text}
+              </span>
+            </div>
+            <button
+              className="reply-preview-cancel"
+              onClick={() => setReplyTo(null)}
+              aria-label="Cancel reply"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {showHint && (
           <div className="md-hint">
             <code>**bold**</code> · <code>*italic*</code> · <code>- bullet</code> ·{' '}
             <code>[link](url)</code> · <code>@name</code>
+          </div>
+        )}
+        {channelSuggestions.length > 0 && (
+          <div className="mention-suggest">
+            {channelSuggestions.map((c) => (
+              <button key={c.id} onClick={() => applyChannel(c.name)}>
+                {c.emoji} #{c.name}
+              </button>
+            ))}
           </div>
         )}
         {(userSuggestions.length > 0 || teamSuggestion) && (
@@ -529,6 +642,7 @@ function Chat({
             Aa
           </button>
           <textarea
+            ref={composerRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

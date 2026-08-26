@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useStore, mentionsFor, dmIdFor } from '../store';
+import { useStore, mentionsFor } from '../store';
 import { Markdown } from '../markdown';
 import { Avatar, EmptyState, Segmented } from '../ui';
 
@@ -157,12 +157,17 @@ function PrivateThreads({ onOpen }: { onOpen: (channelId: string) => void }) {
     .filter((t) => t.others.length > 0)
     .sort((a, b) => (b.last?.ts ?? b.channel.id.length) - (a.last?.ts ?? a.channel.id.length));
 
-  const start = () => {
-    if (picked.length === 0) return;
-    ensureDm(picked);
+  const [starting, setStarting] = useState(false);
+
+  const start = async () => {
+    if (picked.length === 0 || starting) return;
+    setStarting(true);
+    const id = await ensureDm(picked);
+    setStarting(false);
+    if (!id) return;
     setComposing(false);
     setPicked([]);
-    onOpen(dmIdFor([me.id, ...picked]));
+    onOpen(id);
   };
 
   return (
@@ -231,8 +236,8 @@ function PrivateThreads({ onOpen }: { onOpen: (channelId: string) => void }) {
                   </button>
                 ))}
             </div>
-            <button className="btn primary big" onClick={start} disabled={picked.length === 0}>
-              Start chatting {picked.length > 1 ? `(${picked.length} people)` : ''}
+            <button className="btn primary big" onClick={start} disabled={picked.length === 0 || starting}>
+              {starting ? 'Starting…' : `Start chatting ${picked.length > 1 ? `(${picked.length} people)` : ''}`}
             </button>
           </div>
         </div>

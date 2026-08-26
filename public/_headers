@@ -1,0 +1,42 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://vwacjfsalvbyokqvhzes.supabase.co wss://vwacjfsalvbyokqvhzes.supabase.co
+
+# Vite content-hashes these filenames (index-kZ4pQXV3.js), so a changed file
+# is always a *different* URL. That makes them safe to cache forever, and
+# Netlify's default of `max-age=0, must-revalidate` was making the browser
+# re-check ~450 KB of JS on every single launch.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Notes on the CSP above, since a wrong policy breaks the app silently:
+#
+# connect-src  Supabase is the only external origin the bundle actually
+#              talks to. BOTH schemes are required and they are not
+#              interchangeable: https:// for REST + auth, wss:// for the
+#              Realtime websocket that drives live message sync. Dropping
+#              the wss:// entry breaks live updates only *after* sign-in —
+#              exactly the kind of thing a quick smoke test misses.
+#              (github.com and reactjs.org also appear in the bundle, but
+#              only inside React's error-message strings — never fetched.)
+#
+# style-src    'unsafe-inline' is unavoidable: React writes inline `style`
+#              attributes throughout. The tighter split of
+#              `style-src 'self'; style-src-attr 'unsafe-inline'` was
+#              considered and rejected — a browser that doesn't recognise
+#              style-src-attr falls back to style-src, which would strip
+#              every inline style and leave the app looking wrecked on
+#              older iOS. Not worth that risk: there is no innerHTML
+#              anywhere in the app (src/markdown.tsx builds React nodes,
+#              and its link regex hard-requires https?://, so javascript:
+#              URLs can't get through), so the XSS surface this would be
+#              defending is nil.
+#
+# script-src   No 'unsafe-eval' needed — verified zero eval()/new Function()
+#              in the production bundle, and Vite emits no inline <script>.
+#
+# worker-src   Covers navigator.serviceWorker.register('/sw.js'), which is
+#              what makes add-to-home-screen and push work at all.
