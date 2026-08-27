@@ -78,11 +78,24 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
     const h = parseFloat(hours);
     if (!date || !h || h <= 0) return;
     setError('');
-    if (date < from || date > to) {
-      setError('That date is outside the month you’re viewing.');
+    // The shift belongs to the month it was WORKED in, wherever you're
+    // browsing. A date in another month used to be a dead-end error, which
+    // combined with a paid-out month meant a late shift had nowhere legal
+    // to go at all (Shannon, Aug 2026).
+    const d = new Date(date + 'T12:00:00');
+    const target = new Date(d.getFullYear(), d.getMonth(), 1);
+    const targetLine = findPeriod(state.payPeriods, periodStart(target), periodEnd(target))
+      ?.lines.find((l) => l.userId === me.id);
+    if (targetLine?.paidAt) {
+      setError(
+        `You've already been paid out for ${target.toLocaleDateString(undefined, {
+          month: 'long',
+        })}, so it's locked. Ask the owner to reopen it in Payroll — then this shift can be logged and settled with the difference.`
+      );
       return;
     }
     addHours(date, h, parseFloat(tips) || 0, note.trim());
+    if (date < from || date > to) onMonth(target); // follow the entry to its month
     setHours('');
     setTips('');
     setNote('');
@@ -124,7 +137,9 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
                   day: 'numeric',
                 })
               : ''}
-            . These entries are locked.
+            . These entries are locked. Worked a shift since then? Ask the
+            owner to reopen this month in Payroll — then log it and they can
+            settle the difference.
           </p>
         )}
       </div>
@@ -288,11 +303,18 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
   };
 
   const doPay = async (userId: string, name: string, gross: number) => {
+    // Settling a month that isn't over locks out any shift worked after
+    // today — that's how Shannon's Aug 22 shift got stranded. Warn loudly;
+    // the intended rhythm is settling a month on the 15th of the next one.
+    const early = to > fmtDate(new Date());
     if (
       !window.confirm(
         `Mark ${name} paid for ${spanLabel}?\n\n${money(
           gross
-        )} in wages. Their totals lock in and their entries can't be edited until you reopen.`
+        )} in wages. Their totals lock in and their entries can't be edited until you reopen.` +
+          (early
+            ? `\n\n⚠️ ${spanLabel} isn't over yet. Any shift ${name} works after today would be locked out until you reopen this month. The usual rhythm is to settle a month on the 15th of the next one.`
+            : '')
       )
     ) {
       return;

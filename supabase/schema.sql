@@ -817,12 +817,17 @@ create trigger hours_audit_trg after update or delete on public.hours_entries
 -- timesheet drifts away from the payment record computed from it, and the
 -- two can never be reconciled again. Reopening the period (clearing
 -- paid_at) unlocks them.
+-- Covers INSERT too: a new entry dated inside a paid period would be
+-- frozen out of the payroll snapshot the moment it lands — logged but
+-- never payable. Discovered via a real stranded shift (Aug 2026); the
+-- client now explains the reopen path before the user ever hits this.
 create or replace function public.block_paid_period_edits()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   d date; t uuid; u uuid;
 begin
   if tg_op = 'DELETE' then d := old.date; t := old.team_id; u := old.user_id;
+  elsif tg_op = 'INSERT' then d := new.date; t := new.team_id; u := new.user_id;
   else d := coalesce(new.date, old.date); t := old.team_id; u := old.user_id;
   end if;
   if exists (
@@ -841,7 +846,8 @@ begin
   return new;
 end;
 $$;
-create trigger hours_paid_lock before update or delete on public.hours_entries
+drop trigger if exists hours_paid_lock on public.hours_entries;
+create trigger hours_paid_lock before insert or update or delete on public.hours_entries
   for each row execute function public.block_paid_period_edits();
 
 -- ------------------------------------------------------------
