@@ -11,6 +11,10 @@
 //   type "supply_added" — a new checklist item landed.
 //   type "task_assigned" — a checklist item got assigned to someone.
 // All four of the above are opt-out per person via public.notify_prefs.
+//   type "shift_promoted" — an alternate was auto-promoted into a real
+//     shift slot after someone dropped out. NOT pref-gated: like mentions
+//     and DMs it's personally addressed, and missing it could mean not
+//     showing up for a shift you're now scheduled to work.
 //
 // Deploy via the Supabase dashboard: Edge Functions → Create function
 // "notify-push" → paste this file → Deploy. Then add ONE secret:
@@ -283,6 +287,28 @@ Deno.serve(async (req) => {
         `${who?.name ?? "Someone"} assigned you a task in ${channel?.name ?? "a checklist"}: ${String(
           record.text ?? ""
         ).slice(0, 100)}`
+      );
+    }
+
+    // ---- an alternate got promoted into a real shift slot ----------------
+    if (kind === "shift_promoted") {
+      if (!record?.user_id || !record?.date) {
+        return new Response("ignored", { status: 200 });
+      }
+      // date is a bare YYYY-MM-DD; pin to UTC noon so the weekday can't
+      // slip a day in either direction when formatted.
+      const when = new Date(`${record.date}T12:00:00Z`).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+      // Deliberately not pref-gated (see header comment) — but Focus Mode
+      // still applies via deliver().
+      return await deliver(
+        [record.user_id as string],
+        "📣 You're off the bench!",
+        `A spot opened up for ${when} — you've been called up from the bullpen. You're on the books now ⚾️`
       );
     }
 

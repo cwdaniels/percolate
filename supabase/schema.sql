@@ -652,6 +652,34 @@ $$;
 create trigger shift_signups_promote after delete on public.shift_signups
   for each row execute function public.promote_alternate_on_signup_delete();
 
+-- Being pulled off the bench deserves a heads-up: when the trigger above
+-- flips someone's is_alternate to false, tell them. Deliberately NOT
+-- gated by notify_prefs — like mentions and DMs it's personally addressed,
+-- and missing it could mean not showing up for a shift you're now on.
+-- (Focus Mode still applies; the edge function checks it on delivery.)
+create or replace function public.notify_shift_promoted_trigger()
+returns trigger language plpgsql security definer
+set search_path = public, net
+as $$
+begin
+  if OLD.is_alternate and not NEW.is_alternate then
+    perform net.http_post(
+      url := 'https://vwacjfsalvbyokqvhzes.supabase.co/functions/v1/notify-push',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer <VITE_SUPABASE_ANON_KEY>',
+        'x-percolate-signature', '<NOTIFY_PUSH_SECRET>'
+      ),
+      body := jsonb_build_object('type', 'shift_promoted', 'record', row_to_json(NEW))
+    );
+  end if;
+  return NEW;
+end;
+$$;
+create trigger notify_shift_promoted
+  after update on public.shift_signups
+  for each row execute function public.notify_shift_promoted_trigger();
+
 create or replace function public.stamp_note_update()
 returns trigger language plpgsql as $$
 begin
