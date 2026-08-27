@@ -794,6 +794,13 @@ $$;
 create or replace function public.log_hours_change()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
+  -- Mid-cascade of a team delete the teams row is already gone: inserting an
+  -- audit row here would violate hours_audit_team_id_fkey and roll back the
+  -- whole delete. The audit rows for that team are being cascade-deleted in
+  -- the same statement anyway, so skip the insert.
+  if not exists (select 1 from teams where id = old.team_id) then
+    return null;
+  end if;
   if tg_op = 'UPDATE' then
     -- Only record changes to the numbers that actually affect pay.
     if new.hours is distinct from old.hours or new.tips is distinct from old.tips then
