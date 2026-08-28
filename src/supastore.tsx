@@ -100,7 +100,12 @@ async function loadState(teamId: string, uid: string): Promise<State> {
     payLines,
     staffNotes,
   ] = await Promise.all([
-    q<any[]>(supabase.from('team_members').select('team_id, role, teams(id,name,emoji)').eq('user_id', uid)),
+    q<any[]>(
+      supabase
+        .from('team_members')
+        .select('team_id, role, teams(id,name,emoji,pay_period_start_day)')
+        .eq('user_id', uid)
+    ),
     q<any[]>(supabase.from('team_members').select('user_id, role').eq('team_id', teamId)),
     q<any[]>(supabase.from('profiles').select('*')),
     q<any[]>(supabase.from('channels').select('*').eq('team_id', teamId)),
@@ -147,7 +152,12 @@ async function loadState(teamId: string, uid: string): Promise<State> {
 
   const teams: Team[] = myTeams.map((r) => {
     const t = Array.isArray(r.teams) ? r.teams[0] : r.teams;
-    return { id: r.team_id, name: t?.name ?? 'Team', emoji: t?.emoji ?? '☕️' };
+    return {
+      id: r.team_id,
+      name: t?.name ?? 'Team',
+      emoji: t?.emoji ?? '☕️',
+      payPeriodStartDay: t?.pay_period_start_day ?? 1,
+    };
   });
 
   const dmMembersByChannel = new Map<string, string[]>();
@@ -847,6 +857,15 @@ export function SupabaseStoreProvider({
     },
     setTeamEmoji: (emoji) =>
       run(supabase.from('teams').update({ emoji }).eq('id', teamIdRef.current)),
+    setPayPeriodStartDay: async (day) => {
+      const { error } = await supabase
+        .from('teams')
+        .update({ pay_period_start_day: day })
+        .eq('id', teamIdRef.current);
+      if (error) return { error: error.message };
+      await reload();
+      return {};
+    },
     // Not meaningful with real accounts (kept as no-ops so the UI can’t crash).
     addUser: () => {},
     switchUser: () => {},

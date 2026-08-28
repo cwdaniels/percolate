@@ -1,18 +1,60 @@
 import type { HoursEntry, PayPeriod, WageRate } from '../types';
 
-// Fireweed runs calendar-month periods, paid on the 15th of the month after.
-export const periodStart = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+// A team's pay cycle is defined by the day of month a period STARTS on.
+// 1 gives calendar months; 16 gives periods running the 16th to the 15th,
+// which is how Fireweed actually pays. Capped at 28 so the day exists in
+// every month (no February surprises).
+export const DEFAULT_PERIOD_START_DAY = 1;
+export const clampStartDay = (n: number | undefined | null) =>
+  Math.min(Math.max(Math.trunc(Number(n) || DEFAULT_PERIOD_START_DAY), 1), 28);
 
-export const periodEnd = (d: Date) => {
-  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(
-    last.getDate()
+const fmt = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
   ).padStart(2, '0')}`;
-};
 
-// Payday for the period that just ended: the 15th of the following month.
-export const paydayFor = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 15);
+// The pay period CONTAINING `anchor`. Everything downstream keys off this,
+// so a date always resolves to exactly one period no matter which day of
+// it you happen to be looking at.
+export function periodBounds(anchor: Date, startDay: number): { from: string; to: string } {
+  const day = clampStartDay(startDay);
+  // Before this month's start day means we're still inside the period that
+  // opened last month. new Date() normalizes month -1 across a year edge.
+  const m = anchor.getMonth() - (anchor.getDate() < day ? 1 : 0);
+  const start = new Date(anchor.getFullYear(), m, day);
+  const end = new Date(anchor.getFullYear(), m + 1, day);
+  end.setDate(end.getDate() - 1);
+  return { from: fmt(start), to: fmt(end) };
+}
+
+// Step a whole period back or forward, returning an anchor inside it.
+export function shiftPeriod(anchor: Date, startDay: number, dir: -1 | 1): Date {
+  const s = new Date(periodBounds(anchor, startDay).from + 'T12:00:00');
+  return new Date(s.getFullYear(), s.getMonth() + dir, s.getDate());
+}
+
+// Calendar months read fine as "August 2026". Any other cycle has to show
+// both ends, because calling Aug 16 – Sep 15 "August" would be a lie.
+export function periodLabel(from: string, to: string): string {
+  const s = new Date(from + 'T12:00:00');
+  const e = new Date(to + 'T12:00:00');
+  if (s.getDate() === 1) {
+    return s.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+  const md: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  return `${s.toLocaleDateString(undefined, md)} – ${e.toLocaleDateString(
+    undefined,
+    md
+  )}, ${e.getFullYear()}`;
+}
+
+// Payday is the day after the period closes — the rhythm Fireweed already
+// runs (the period ending the 15th gets paid on the 16th).
+export const paydayFor = (periodEndDate: string) => {
+  const d = new Date(periodEndDate + 'T12:00:00');
+  d.setDate(d.getDate() + 1);
+  return d;
+};
 
 export const money = (n: number) =>
   n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });

@@ -12,6 +12,9 @@ export interface Team {
   id: string;
   name: string;
   emoji: string;
+  // Day of month a pay period opens. 1 = calendar months; 16 = periods
+  // running the 16th to the 15th. Absent means 1.
+  payPeriodStartDay?: number;
 }
 
 export type ChannelType =

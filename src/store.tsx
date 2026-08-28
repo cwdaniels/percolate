@@ -628,6 +628,10 @@ export interface Api {
   switchTeam(id: string): void;
   addTeam(name: string, emoji: string): void;
   setTeamEmoji(emoji: string): void;
+  // Owner-only: the day of month a pay period opens (1 = calendar months,
+  // 16 = the 16th-to-15th cycle). Changes only affect how periods are
+  // computed from here on; already-settled periods keep their own dates.
+  setPayPeriodStartDay(day: number): Promise<{ error?: string }>;
   updateProfile(name: string, emoji: string): void;
   resetAll(): void;
 }
@@ -1200,6 +1204,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...s,
           teams: s.teams.map((t) => (t.id === s.currentTeamId ? { ...t, emoji } : t)),
         }));
+      },
+      async setPayPeriodStartDay(day: number) {
+        setState((s) => ({
+          ...s,
+          teams: s.teams.map((t) =>
+            t.id === s.currentTeamId ? { ...t, payPeriodStartDay: day } : t
+          ),
+        }));
+        return {};
       },
       updateProfile(name: string, emoji: string) {
         setState((s) => ({

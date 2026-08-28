@@ -39,6 +39,13 @@ create table public.teams (
   -- Message retention. NULL = keep everything (the default). Floor of 7 so
   -- a mistyped '1' can't wipe a week of conversation before anyone notices.
   retention_days integer check (retention_days is null or retention_days >= 7),
+  -- Day of month a pay period opens. 1 = calendar months; 16 = periods
+  -- running the 16th to the 15th, which is how Fireweed actually pays.
+  -- Capped at 28 so the day exists in every month. Only affects how NEW
+  -- periods are computed — pay_periods rows carry their own real dates,
+  -- so already-settled history is never restated by a change here.
+  pay_period_start_day smallint not null default 1
+    check (pay_period_start_day between 1 and 28),
   created_at     timestamptz not null default now()
 );
 

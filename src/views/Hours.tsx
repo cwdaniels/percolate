@@ -1,25 +1,59 @@
 import React, { useMemo, useState } from 'react';
-import { useStore, fmtDate, monthKey } from '../store';
-import { Avatar, EmptyState, MonthNav, Segmented } from '../ui';
+import { useStore, fmtDate } from '../store';
+import { Avatar, EmptyState, Segmented } from '../ui';
 import {
+  DEFAULT_PERIOD_START_DAY,
   findPeriod,
   money,
   paydayFor,
-  periodEnd,
-  periodStart,
+  periodBounds,
+  periodLabel,
   rateOn,
+  shiftPeriod,
   totalsFor,
 } from '../lib/payroll';
 
 const fmtHours = (n: number) => String(parseFloat(n.toFixed(2)));
 
+// Steps a whole pay period at a time rather than a calendar month, since
+// the two are only the same thing when the cycle starts on the 1st.
+function PeriodNav({
+  anchor,
+  startDay,
+  onChange,
+}: {
+  anchor: Date;
+  startDay: number;
+  onChange: (d: Date) => void;
+}) {
+  const { from, to } = periodBounds(anchor, startDay);
+  return (
+    <div className="month-nav">
+      <button
+        aria-label="Previous pay period"
+        onClick={() => onChange(shiftPeriod(anchor, startDay, -1))}
+      >
+        ‹
+      </button>
+      <span>{periodLabel(from, to)}</span>
+      <button
+        aria-label="Next pay period"
+        onClick={() => onChange(shiftPeriod(anchor, startDay, 1))}
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
 export function Hours() {
-  const { me } = useStore();
+  const { state, me } = useStore();
   const [mode, setMode] = useState<'mine' | 'payroll'>('mine');
-  const [month, setMonth] = useState(() => {
-    const t = new Date();
-    return new Date(t.getFullYear(), t.getMonth(), 1);
-  });
+  // An anchor date; the period containing it is what's on screen.
+  const [anchor, setAnchor] = useState(() => new Date());
+  const startDay =
+    state.teams.find((t) => t.id === state.currentTeamId)?.payPeriodStartDay ??
+    DEFAULT_PERIOD_START_DAY;
 
   return (
     <div className="screen">
@@ -38,27 +72,35 @@ export function Hours() {
           />
         )}
         {mode === 'mine' ? (
-          <MyHours month={month} onMonth={setMonth} />
+          <MyHours anchor={anchor} onAnchor={setAnchor} startDay={startDay} />
         ) : (
-          <Payroll month={month} onMonth={setMonth} />
+          <Payroll anchor={anchor} onAnchor={setAnchor} startDay={startDay} />
         )}
       </div>
     </div>
   );
 }
 
-function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }) {
+function MyHours({
+  anchor,
+  onAnchor,
+  startDay,
+}: {
+  anchor: Date;
+  onAnchor: (d: Date) => void;
+  startDay: number;
+}) {
   const { state, me, addHours, deleteHours } = useStore();
-  const mk = monthKey(month);
-  const from = periodStart(month);
-  const to = periodEnd(month);
+  const { from, to } = periodBounds(anchor, startDay);
+  const label = periodLabel(from, to);
 
   const entries = state.hoursEntries
     .filter(
       (e) =>
         e.userId === me.id &&
         e.teamId === state.currentTeamId &&
-        e.date.startsWith(mk)
+        e.date >= from &&
+        e.date <= to
     )
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -78,24 +120,26 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
     const h = parseFloat(hours);
     if (!date || !h || h <= 0) return;
     setError('');
-    // The shift belongs to the month it was WORKED in, wherever you're
-    // browsing. A date in another month used to be a dead-end error, which
-    // combined with a paid-out month meant a late shift had nowhere legal
-    // to go at all (Shannon, Aug 2026).
+    // The shift belongs to the period it was WORKED in, wherever you're
+    // browsing. A date outside the current view used to be a dead-end
+    // error, which combined with a settled period meant a late shift had
+    // nowhere legal to go at all (Shannon, Aug 2026).
     const d = new Date(date + 'T12:00:00');
-    const target = new Date(d.getFullYear(), d.getMonth(), 1);
-    const targetLine = findPeriod(state.payPeriods, periodStart(target), periodEnd(target))
-      ?.lines.find((l) => l.userId === me.id);
+    const target = periodBounds(d, startDay);
+    const targetLine = findPeriod(state.payPeriods, target.from, target.to)?.lines.find(
+      (l) => l.userId === me.id
+    );
     if (targetLine?.paidAt) {
       setError(
-        `You've already been paid out for ${target.toLocaleDateString(undefined, {
-          month: 'long',
-        })}, so it's locked. Ask the owner to reopen it in Payroll — then this shift can be logged and settled with the difference.`
+        `You've already been paid out for ${periodLabel(
+          target.from,
+          target.to
+        )}, so it's locked. Ask the owner to reopen it in Payroll — then this shift can be logged and settled with the difference.`
       );
       return;
     }
     addHours(date, h, parseFloat(tips) || 0, note.trim());
-    if (date < from || date > to) onMonth(target); // follow the entry to its month
+    if (date < from || date > to) onAnchor(d); // follow the entry to its period
     setHours('');
     setTips('');
     setNote('');
@@ -104,14 +148,14 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
   return (
     <>
       <div className="card">
-        <MonthNav month={month} onChange={onMonth} />
+        <PeriodNav anchor={anchor} startDay={startDay} onChange={onAnchor} />
       </div>
 
       <div className="card total-card">
         <div className="total-head">
           <span className="total-num">{fmtHours(totals.hours)}</span>
           <span className="total-label">
-            hours in {month.toLocaleDateString(undefined, { month: 'long' })}
+            {startDay === 1 ? `hours in ${label}` : 'hours this pay period'}
           </span>
         </div>
         <div className="earn-row">
@@ -137,9 +181,9 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
                   day: 'numeric',
                 })
               : ''}
-            . These entries are locked. Worked a shift since then? Ask the
-            owner to reopen this month in Payroll — then log it and they can
-            settle the difference.
+            . These entries are locked. Worked a shift inside this period
+            since then? Ask the owner to reopen it in Payroll — then log it
+            and they can settle the difference.
           </p>
         )}
       </div>
@@ -188,9 +232,9 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
       )}
 
       <div className="card">
-        <h3>This month</h3>
+        <h3>{startDay === 1 ? 'This month' : 'This pay period'}</h3>
         {entries.length === 0 && (
-          <p className="hint">No shifts logged yet this month.</p>
+          <p className="hint">No shifts logged yet in this pay period.</p>
         )}
         {entries.map((e) => (
           <div key={e.id} className="entry-row">
@@ -220,7 +264,15 @@ function MyHours({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
 
 type Span = 'month' | 'year';
 
-function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }) {
+function Payroll({
+  anchor,
+  onAnchor,
+  startDay,
+}: {
+  anchor: Date;
+  onAnchor: (d: Date) => void;
+  startDay: number;
+}) {
   const { state, setWageRate, markPersonPaid, reopenPerson, setStaffNote } = useStore();
   const [span, setSpan] = useState<Span>('month');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -233,14 +285,14 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteVal, setNoteVal] = useState('');
 
-  const year = month.getFullYear();
-  // A yearly view is the tax-time report: same maths, wider window.
-  const from = span === 'month' ? periodStart(month) : `${year}-01-01`;
-  const to = span === 'month' ? periodEnd(month) : `${year}-12-31`;
+  const year = anchor.getFullYear();
+  const bounds = periodBounds(anchor, startDay);
+  // A yearly view is the tax-time report: same maths, wider window, and
+  // always a calendar year regardless of the pay cycle.
+  const from = span === 'month' ? bounds.from : `${year}-01-01`;
+  const to = span === 'month' ? bounds.to : `${year}-12-31`;
   const spanLabel =
-    span === 'month'
-      ? month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-      : String(year);
+    span === 'month' ? periodLabel(bounds.from, bounds.to) : String(year);
 
   const inRange = useMemo(
     () =>
@@ -274,8 +326,7 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
   const anyMissingRate = withHours.some((r) => r.totals.missingRate && !r.paid);
 
   const unpaid = withHours.filter((r) => !r.paid);
-  const overdue =
-    span === 'month' && unpaid.length > 0 && new Date() > paydayFor(month);
+  const overdue = span === 'month' && unpaid.length > 0 && new Date() > paydayFor(to);
 
   const copyCsv = async () => {
     const rows = [
@@ -303,9 +354,8 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
   };
 
   const doPay = async (userId: string, name: string, gross: number) => {
-    // Settling a month that isn't over locks out any shift worked after
-    // today — that's how Shannon's Aug 22 shift got stranded. Warn loudly;
-    // the intended rhythm is settling a month on the 15th of the next one.
+    // Settling a period that isn't over locks out any shift worked after
+    // today — that's how Shannon's Aug 22 shift got stranded. Warn loudly.
     const early = to > fmtDate(new Date());
     if (
       !window.confirm(
@@ -313,7 +363,12 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
           gross
         )} in wages. Their totals lock in and their entries can't be edited until you reopen.` +
           (early
-            ? `\n\n⚠️ ${spanLabel} isn't over yet. Any shift ${name} works after today would be locked out until you reopen this month. The usual rhythm is to settle a month on the 15th of the next one.`
+            ? `\n\n⚠️ This pay period runs through ${new Date(
+                to + 'T12:00:00'
+              ).toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+              })} and isn't over yet. Any shift ${name} works between now and then would be locked out until you reopen it.`
             : '')
       )
     ) {
@@ -363,8 +418,8 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
     <>
       <Segmented
         options={[
-          { value: 'month' as const, label: 'Monthly' },
-          { value: 'year' as const, label: 'Yearly' },
+          { value: 'month' as const, label: 'Pay period' },
+          { value: 'year' as const, label: 'Year' },
         ]}
         value={span}
         onChange={(v) => {
@@ -375,19 +430,19 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
 
       <div className="card">
         {span === 'month' ? (
-          <MonthNav month={month} onChange={onMonth} />
+          <PeriodNav anchor={anchor} startDay={startDay} onChange={onAnchor} />
         ) : (
           <div className="year-nav">
             <button
               className="link"
-              onClick={() => onMonth(new Date(year - 1, month.getMonth(), 1))}
+              onClick={() => onAnchor(new Date(year - 1, anchor.getMonth(), anchor.getDate()))}
             >
               ‹
             </button>
             <strong>{year}</strong>
             <button
               className="link"
-              onClick={() => onMonth(new Date(year + 1, month.getMonth(), 1))}
+              onClick={() => onAnchor(new Date(year + 1, anchor.getMonth(), anchor.getDate()))}
             >
               ›
             </button>
@@ -402,8 +457,8 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
             <strong>
               {unpaid.length} {unpaid.length === 1 ? 'person' : 'people'} still unpaid
             </strong>{' '}
-            for {month.toLocaleDateString(undefined, { month: 'long' })} — payday was{' '}
-            {paydayFor(month).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.
+            for {spanLabel} — payday was{' '}
+            {paydayFor(to).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.
           </span>
         </div>
       )}
@@ -437,8 +492,8 @@ function Payroll({ month, onMonth }: { month: Date; onMonth: (d: Date) => void }
       {error && <p className="hint error-hint">{error}</p>}
       {span === 'year' && (
         <p className="hint">
-          Yearly is a read-only summary for taxes. Switch to Monthly to set
-          rates or mark someone paid.
+          The yearly view is a read-only calendar-year summary for taxes.
+          Switch to Pay period to set rates or mark someone paid.
         </p>
       )}
 
